@@ -2,11 +2,11 @@
 
 Your channel remembers. A persistent Twitch lore keeper built for Codex x TwitchCon.
 
-## Current build: step 2 of 7
+## Current build: step 3 of 7
 
 Working: TypeScript server, SQLite canon/pending storage, eight fictional sample entries,
 transparent overlay, rotating ticker, reconnecting WebSocket, and local demo studio.
-Twitch and voice rewriting are planned next. Panel moderation arrives in step 5.
+Authenticated Twitch chat and bot OAuth are implemented. Live connection requires your app credentials and bot authorization. EventSub and voice rewriting are next; panel moderation arrives in step 5.
 
 ## Try the overlay
 
@@ -34,7 +34,7 @@ npm start
 
 Open http://127.0.0.1:3000 for the demo studio.
 http://127.0.0.1:3000/api/canon returns eight sample entries.
-http://127.0.0.1:3000/health reports `ok: true`, `canonCount: 8`, and `stage: 2`.
+http://127.0.0.1:3000/health reports `ok: true`, `canonCount: 8`, and `stage: 3`.
 No Twitch or OpenAI credentials are required for this step.
 
 ```sh
@@ -55,13 +55,13 @@ backup API or stop the app before copying the database and any WAL sidecar files
 1. Choose your broadcaster account and a dedicated bot account. Enable Twitch 2FA.
 2. Visit https://dev.twitch.tv/console/apps and register an application, category
    Chat Bot. Use `http://localhost:3000/auth/twitch/callback` as the OAuth redirect URL.
-   The callback handler will be implemented with authenticated chat in step 3;
-   it does not exist in the step 1 scaffold.
+   The callback is now implemented. If using port 3001, register
+   `http://localhost:3001/auth/twitch/callback` instead (or add it as a second redirect).
 3. Put the client ID and generated client secret in `.env`. Never commit credentials.
 4. Authorize the **bot account** with your app for `chat:read chat:edit` for
    Twurple's authenticated IRC chat client. These are distinct from EventSub chat scopes
    (`user:read:chat user:write:chat`), which are not used by this planned chat transport.
-   Step 3 will provide the authorization-code flow and token storage. Do not paste
+   Use the panel’s **Authorize bot account** link for the authorization-code flow and token storage. Do not paste
    tokens into chat or use an unrelated app's token generator.
 5. Authorize the **broadcaster account** with the same application for
    `channel:read:redemptions channel:read:subscriptions`. Incoming `channel.raid`
@@ -76,7 +76,7 @@ backup API or stop the app before copying the database and any WAL sidecar files
    and leave the reward enabled and unpaused. Reward title must match
    `TWITCH_REWARD_TITLE` exactly. If Channel Points are unavailable, you can test locally
    but cannot demonstrate the required live redemption until an eligible channel is used.
-8. After step 3 implements OAuth, complete both account authorizations. After step 4,
+8. Authorize the bot now using the instructions below. Broadcaster OAuth arrives in step 4. After step 4,
    redeem the reward with `term: definition` and verify the overlay reacts. The same
    step will define how plain text and the latest pending proposal are handled.
 
@@ -94,15 +94,75 @@ Official references:
 
 1. Scaffold + SQLite + seeds (complete).
 2. Transparent 1920×1080 `/overlay`, WebSocket updates, local test reveal (complete).
-3. Authenticated chat: `!canon term`, `!canon add term: definition`, `!lore`.
+3. Authenticated chat: `!canon term`, `!canon add term: definition`, `!lore` (implemented; authorize your bot to verify live).
 4. EventSub WebSocket: Canonize this reward, subscriptions, incoming raids.
 5. Local `/panel`: approve/reject, browse canon, edit `voice.md`.
 6. Optional OpenAI rewriting with timeout and plain-text fallback.
 7. Animation polish, complete clean-clone instructions, Devpost text, <3-minute shot list.
 
-Keep the server bound to loopback for local OBS use. Panel authentication must be
+The server binds to 127.0.0.1 and only accepts localhost/127.0.0.1 Host headers for local OBS use. HOST is reserved and does not override this. Panel authentication must be
 implemented before any remote exposure. The eventual OBS Browser Source will be
 `http://127.0.0.1:3000/overlay`, width 1920, height 1080, transparent background.
 
 The final demo will open on a live CANONIZED reveal, show the actual redemption,
 query the lore in chat, restart to prove persistence, and close on the panel.
+
+## Connect authenticated chat (step 3)
+
+Channel Points activation does not block this step. First create a separate bot
+account and register your confidential Twitch application as described above.
+
+1. Edit **`.env`** (not `.env.example`). Set these values:
+
+   ```dotenv
+   PORT=3001
+   TWITCH_ENABLED=true
+   TWITCH_CLIENT_ID=your_application_client_id
+   TWITCH_CLIENT_SECRET=your_application_client_secret
+   TWITCH_CHANNEL=your_streamer_login
+   TWITCH_BOT_USERNAME=your_bot_login
+   ```
+
+2. In the Twitch Developer Console → your app → Manage, register
+   `http://localhost:3001/auth/twitch/callback` exactly. The callback derives from PORT;
+   `TWITCH_OAUTH_REDIRECT_URI` can explicitly set this same local URL if needed.
+3. Stop your old server with Ctrl+C, then run **`npm start`**. Do not run two servers
+   on the same port. Open `http://127.0.0.1:3001/panel`.
+4. Click **Authorize bot account**. The flow switches to localhost for its browser-bound
+   cookie. Sign in as the bot (switch Twitch accounts if needed), confirm that the
+   requested permissions are read/send chat, and authorize. Canon rejects the wrong
+   account and verifies the token belongs to your app.
+5. Return to the panel. Wait for **Connected as your_bot in #your_channel**.
+   `/health` now reports `twitchConnected: true`; `/api/twitch/status` gives the current
+   connection status without exposing credentials.
+6. In your channel chat, send these from your main account, at least five seconds apart:
+
+   ```text
+   !canon The Chair Council
+   !canon add Moon cheese: The moon sponsors our snacks.
+   !lore
+   ```
+
+   Expect a stored definition, a pending proposal acknowledgement, and random lore.
+   `!canon Moon cheese` must report no canon until the proposal is approved. Proposals
+   persist across restarts and remain hidden from canonical query/list responses.
+   Panel moderation and pending browsing arrive in step 5.
+
+Replies appear in both the server console and Twitch chat, prefixed `Canon:` and
+limited to 450 characters. Commands have a five-second per-user cooldown and a
+1.5-second global cooldown; commands during cooldown are ignored. Normal conversation
+and the bot’s own messages are ignored. Twurple also applies outbound rate limits.
+If chat is follower/subscriber restricted, adjust your test channel settings yourself
+or grant the bot the appropriate access. Moderator status is not required for normal
+unrestricted chat.
+
+OAuth state is single-use, browser-bound, and valid for ten minutes. Tokens are written
+with owner-only file permissions to ignored `data/twitch-bot-token.json`; refreshed
+tokens are saved automatically. Authorization is validated at startup and every 55 minutes. Do not share that file. Existing `.env` token fields
+are reserved for future import support; the bot currently uses the OAuth token file.
+On invalid credentials, revoked tokens, or connection problems, the panel shows a
+status message and the local overlay remains usable. Reauthorize from the panel when
+needed. OAuth callback query strings are not logged.
+
+Live Twitch verification still requires authorization by the bot account owner;
+unit tests verify command storage and OAuth state boundaries without contacting Twitch.

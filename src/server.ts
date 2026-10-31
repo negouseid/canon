@@ -1,18 +1,27 @@
 import 'dotenv/config';
-import Fastify from 'fastify';
+import Fastify, { LogController } from 'fastify';
 import { readFileSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { openStore } from './store.js';
 import { seed } from './seed.js';
+import { registerTwitch } from './twitch.js';
 const port = Number(process.env.PORT || 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 to 65535');
 const store = openStore(process.env.DATABASE_PATH || './data/canon.sqlite');
 if (process.env.SEED_ON_START !== 'false') seed(store);
-const app = Fastify({ logger: true });
+// OAuth callback query strings contain authorization codes: do not log request URLs.
+const app = Fastify({ logger: true, logController: new LogController({ disableRequestLogging: true }) });
+app.addHook('onRequest', async (request, reply) => {
+  const allowedHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`]);
+  if (!allowedHosts.has(request.headers.host || '')) return reply.code(403).send({ error: 'Local access only' });
+  reply.header('Referrer-Policy', 'no-referrer');
+});
+const twitch = registerTwitch(app, store, port);
 const ws = new WebSocketServer({ noServer: true });
 app.server.on('upgrade', (request, socket, head) => {
   const origin = request.headers.origin;
-  if (request.url !== '/ws' || !origin || new URL(origin).host !== request.headers.host) {
+  const host = request.headers.host;
+  if (request.url !== '/ws' || ![`localhost:${port}`, `127.0.0.1:${port}`].includes(host || '') || origin !== `http://${host}`) {
     socket.destroy(); return;
   }
   ws.handleUpgrade(request, socket, head, client => ws.emit('connection', client, request));
@@ -21,7 +30,7 @@ ws.on('connection', client => {
   client.on('error', error => app.log.warn(error));
   client.send(JSON.stringify({ type: 'snapshot', entries: store.list() }));
 });
-app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 2, twitchConnected: false }));
+app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 3, twitchConnected: twitch.status.connected }));
 app.get('/api/canon', async () => store.list());
 app.get('/', async (_, reply) => reply.redirect('/panel'));
 for (const page of ['overlay', 'panel']) {
@@ -42,5 +51,8 @@ app.post('/api/test-canonized', { config: {}, bodyLimit: 1024 }, async (request,
 app.addHook('preClose', async () => { for (const client of ws.clients) client.terminate(); ws.close(); });
 app.addHook('onClose', async () => { store.close(); });
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void app.close(); });
-try { await app.listen({ port, host: process.env.HOST || '127.0.0.1' }); }
+try {
+  await app.listen({ port, host: '127.0.0.1' });
+  void twitch.start();
+}
 catch (error) { app.log.error(error); await app.close(); process.exitCode = 1; }
