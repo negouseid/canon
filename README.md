@@ -2,11 +2,23 @@
 
 Your channel remembers. A persistent Twitch lore keeper built for Codex x TwitchCon.
 
-## Current build: step 1 of 7
+## Current build: step 2 of 7
 
 Working: TypeScript server, SQLite canon/pending storage, eight fictional sample entries,
-idempotent seeding, and restart-persistence tests. Twitch, overlay, panel, and voice rewriting
-are planned next; configuration flags for them are placeholders at this stage.
+transparent overlay, rotating ticker, reconnecting WebSocket, and local demo studio.
+Twitch and voice rewriting are planned next. Panel moderation arrives in step 5.
+
+## Try the overlay
+
+Open `/panel`, then click **Fire test CANONIZED**. The embedded preview and all open
+`/overlay` browser sources show a nine-second animated sample reveal labeled TEST.
+Tests do not add or promote database entries. Multiple reveals queue in order (up to
+20 waiting); the ticker rotates every 12 seconds. The overlay reconnects automatically.
+
+In OBS add a Browser Source: `http://127.0.0.1:3000/overlay`, width **1920**, height
+**1080**. The overlay background is transparent. `/overlay?preview` adds a dark preview
+background for browser rehearsal. Open the overlay before triggering a test; transient
+reveals are not replayed to clients connecting later.
 
 ## Clean-clone setup
 
@@ -20,9 +32,9 @@ cp .env.example .env
 npm start
 ```
 
-Open http://127.0.0.1:3000 for the scaffold landing page.
+Open http://127.0.0.1:3000 for the demo studio.
 http://127.0.0.1:3000/api/canon returns eight sample entries.
-http://127.0.0.1:3000/health reports `ok: true`, `canonCount: 8`, and `stage: 1`.
+http://127.0.0.1:3000/health reports `ok: true`, `canonCount: 8`, and `stage: 2`.
 No Twitch or OpenAI credentials are required for this step.
 
 ```sh
@@ -80,8 +92,8 @@ Official references:
 
 ## Build sequence and demo
 
-1. Scaffold + SQLite + seeds (current).
-2. Transparent 1920×1080 `/overlay`, WebSocket updates, local test reveal.
+1. Scaffold + SQLite + seeds (complete).
+2. Transparent 1920×1080 `/overlay`, WebSocket updates, local test reveal (complete).
 3. Authenticated chat: `!canon term`, `!canon add term: definition`, `!lore`.
 4. EventSub WebSocket: Canonize this reward, subscriptions, incoming raids.
 5. Local `/panel`: approve/reject, browse canon, edit `voice.md`.
