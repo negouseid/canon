@@ -356,6 +356,7 @@ use, but it does not change replies in this release. No OpenAI key or API call i
 |---|---|
 | GitHub 404 / Repository not found | Accept the repo invitation using the invited account, authenticate Git, then clone. Owner must know your GitHub username to invite you. |
 | `git`, `node`, or `npm` not found | Install the prerequisite, reopen the terminal, and rerun the version checks. |
+| PowerShell blocks npm.ps1 | Use Command Prompt/Git Bash, or invoke `npm.cmd` instead of `npm` in PowerShell. |
 | `tsx` not found | In the repo directory run `npm ci --include=dev`; do not omit dev dependencies. |
 | Can't find package.json | Run commands inside the cloned `canon` directory. |
 | Panel URL doesn't open | Keep `npm start` running; read its printed port. If EADDRINUSE, choose another PORT in `.env` and restart. |
@@ -367,6 +368,7 @@ use, but it does not change replies in this release. No OpenAI key or API call i
 | Reward shows only its title/prompt and the usual message box | Some Twitch layouts reuse that box for the selected reward. With the reward selected, type `latest` (no !canon) and submit. Confirm “Redeemed Canonize this” in chat and CANONIZED in the panel. |
 | Bot doesn't answer | Confirm Chat connected; use the configured channel's Chat tab and wait five seconds between commands. No live stream is needed for command tests. |
 | `latest` says no canon | `!canon latest` is a lookup. Use `latest` as reward text; first ensure a pending proposal exists. |
+| OBS has no Browser source option | Install a current official OBS build that includes Browser Source support. The optional browser-dock menu may vary by platform. |
 | OBS source blank/frozen | Check the URL in your browser, the port, source visibility and dimensions. Refresh its cache in OBS if stale. Keep Canon running; the overlay reconnects. |
 | Panel controls don't click in OBS | Right-click source → Interact, or use a normal browser/dock. |
 | Temporary-memory warning | The configured DB is unavailable; the demo still works but is not durable. Use a writable DATABASE_PATH and restart before demonstrating persistence. |
@@ -399,6 +401,10 @@ Back up SQLite with its backup API, or stop Canon before copying the database an
 sidecars. Credentials, tokens, and databases are excluded by `.gitignore`.
 
 ## Validation and build story
+
+The [first-time judge walkthrough audit](docs/JUDGE-WALKTHROUGH.md) lists the onboarding
+gaps fixed, the fresh-clone simulation, and which OBS/Twitch steps were verified versus
+which still require the judge’s own accounts or installed software.
 
 Verified with the real channel: authenticated command/reply, pending proposal,
 Channel Points redemption, canonical lookup afterward, panel approval, and persistence
