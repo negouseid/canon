@@ -86,3 +86,20 @@ promise to survive OS termination, missing native binaries, exhausted memory, or
 machine-wide failure. A port conflict needs a free port. Temporary memory fallback is
 not durable storage; the warning is deliberate. EventSub recovery tests do not backfill
 Twitch events lost during an outage, or substitute for a real raid/subscription demo.
+
+## Fresh GitHub clone confirmation
+
+The reliability commit was pushed, then cloned again from GitHub into a new directory.
+`npm ci`, copying only `.env.example` to `.env`, typechecking, and all **19 tests** passed.
+The local startup used `PORT=3002` because the existing demo uses 3001 and another local
+service uses 3000; no credentials or database were copied into the clone.
+
+Browser verification in that clone created **Offline judge test**, approved it, received
+CANONIZED, and queried **No keys required.** The server was stopped while the browser
+remained open: the ticker kept rotating and showed RECONNECTING. After restarting,
+the browser reconnected and the saved entry remained available. This is in addition
+to the automated offline restart test.
+
+The configured main instance also restarted successfully with ten original entries,
+persistent storage healthy, authenticated chat connected, and all three EventSub
+subscriptions ready. The clone's demo entries do not affect the main database.

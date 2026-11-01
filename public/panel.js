@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const element = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
 let state = { csrf: '', pending: [], canon: [], rejectedCount: 0 };
 let voiceRevision = '', savedVoice = '', voiceLoaded = false, voiceSaving = false;
-let refreshing = false, refreshAgain = false, initialized = false;
+let refreshing = false, refreshAgain = false, initialized = false, syncError = false;
 const reviewing = new Set();
 function message(id, text, error = false) { $(id).textContent = text; $(id).className = 'message' + (error ? ' error' : ''); }
 async function api(path, options = {}) {
@@ -39,8 +39,8 @@ function renderCanon() {
 async function refreshPanel() {
   if (refreshing) { refreshAgain = true; return; }
   refreshing = true;
-  try { const previous = state; const incoming = await api('/api/panel'); if (!incoming || !Array.isArray(incoming.pending) || !Array.isArray(incoming.canon)) throw Error('Invalid panel snapshot. Retrying.'); state = incoming; $('storageMessage').textContent = state.storage?.warning || ''; if (!initialized || JSON.stringify(previous.pending) !== JSON.stringify(state.pending)) renderPending(); if (!initialized || JSON.stringify(previous.canon) !== JSON.stringify(state.canon)) renderCanon(); $('rejectedCount').textContent = state.rejectedCount; initialized = true; $('syncStatus').textContent = 'Memory synced · ' + new Date().toLocaleTimeString(); }
-  catch (error) { message('panelMessage', error.message, true); }
+  try { const previous = state; const incoming = await api('/api/panel'); if (!incoming || !Array.isArray(incoming.pending) || !Array.isArray(incoming.canon)) throw Error('Invalid panel snapshot. Retrying.'); state = incoming; if (syncError) { message('panelMessage', 'Connection restored.'); syncError = false; } $('storageMessage').textContent = state.storage?.warning || ''; if (!initialized || JSON.stringify(previous.pending) !== JSON.stringify(state.pending)) renderPending(); if (!initialized || JSON.stringify(previous.canon) !== JSON.stringify(state.canon)) renderCanon(); $('rejectedCount').textContent = state.rejectedCount; initialized = true; $('syncStatus').textContent = 'Memory synced · ' + new Date().toLocaleTimeString(); }
+  catch (error) { syncError = true; message('panelMessage', error.message, true); }
   finally { refreshing = false; if (refreshAgain) { refreshAgain = false; void refreshPanel(); } }
 }
 async function review(entry, action) {
