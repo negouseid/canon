@@ -37,7 +37,7 @@ ws.on('connection', client => {
   client.on('error', error => app.log.warn(error));
   client.send(JSON.stringify({ type: 'snapshot', entries: store.list() }));
 });
-app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 5, twitchConnected: twitch.status.connected, eventsubReady: twitch.eventsub.ready }));
+app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 7, twitchConnected: twitch.status.connected, eventsubReady: twitch.eventsub.ready }));
 app.get('/api/canon', async () => store.list());
 app.get('/', async (_, reply) => reply.redirect('/panel'));
 for (const page of ['overlay', 'panel']) {
