@@ -1,11 +1,12 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Store } from './store.js';
 import type { Publish } from './events.js';
+import { handleCommand } from './commands.js';
 
-export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md')) {
+export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md'), storage?: { mode: string; persistent: boolean; available: boolean; warning: string }) {
   const csrf = randomBytes(32).toString('hex');
   const revision = (text: string) => createHash('sha256').update(text).digest('hex');
   function readVoice() {
@@ -19,7 +20,7 @@ export function registerPanel(app: FastifyInstance, store: Store, publish: Publi
   }
   app.get('/api/panel', async (_, reply) => {
     reply.header('Cache-Control', 'no-store');
-    return { csrf, pending: store.list('pending'), canon: store.list(), rejectedCount: store.list('rejected').length };
+    return { csrf, pending: store.list('pending'), canon: store.list(), rejectedCount: store.list('rejected').length, storage };
   });
   app.post<{ Params: { id: string }; Body: { action: 'approve' | 'reject' } }>('/api/panel/proposals/:id/review', {
     preHandler: mutation, bodyLimit: 1024,
@@ -39,6 +40,14 @@ export function registerPanel(app: FastifyInstance, store: Store, publish: Publi
     }
     publish({ type: 'pending-changed' });
     return { entry };
+  });
+  app.post<{ Body: { command: string } }>('/api/panel/rehearse', {
+    preHandler: mutation, bodyLimit: 8000,
+    schema: { body: { type: 'object', required: ['command'], additionalProperties: false, properties: { command: { type: 'string', minLength: 1, maxLength: 1500 } } } }
+  }, async (request, reply) => {
+    const response = handleCommand(store, request.body.command, 'Demo viewer', 'demo:' + randomUUID(), () => publish({ type: 'pending-changed' }));
+    if (!response) return reply.code(400).send({ error: 'Use !canon term, !canon add term: definition, or !lore.' });
+    return { reply: 'Canon: ' + response, local: true };
   });
   app.get('/api/panel/voice', async (_, reply) => {
     reply.header('Cache-Control', 'no-store');

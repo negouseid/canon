@@ -8,6 +8,7 @@ export function isCanonCommand(text: string): boolean {
 /** Return a response only for recognized commands. Proposals never become canon here. */
 export function handleCommand(store: Store, text: string, author: string, messageId: string, onProposal?: () => void): string | undefined {
   const input = text.trim();
+  if (/[\x00-\x1f\x7f]/.test(input)) return 'Use a single-line canon command without control characters.';
   if (/^!lore$/i.test(input)) {
     const entry = store.random();
     return entry ? `Channel history: ${entry.term} — ${entry.definition}` : 'Our history is unwritten. Propose lore with !canon add term: definition';
@@ -22,7 +23,7 @@ export function handleCommand(store: Store, text: string, author: string, messag
     const term = proposal.slice(0, colon).trim();
     const definition = proposal.slice(colon + 1).trim();
     if (colon < 1 || !term || !definition) return 'Propose lore with !canon add term: definition';
-    if (term.length > 100 || definition.length > 1000) return 'Keep the term under 101 characters and its definition under 1001.';
+    if (term.length > 100 || definition.length > 1000) return 'Use a term up to 100 characters and a definition up to 1000.';
     if (!messageId) return 'Could not identify that message. Please try again.';
     const entry = store.add({ term, definition, author, sourceEvent: `chat:${messageId}` });
     if (entry) onProposal?.();

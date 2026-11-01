@@ -3,6 +3,7 @@ export type LiveEvent =
   | { type: 'canonized'; entry: Entry; test?: boolean }
   | { type: 'snapshot'; entries: Entry[] }
   | { type: 'pending-changed' }
+  | { type: 'heartbeat' }
   | { type: 'community'; kind: 'raid' | 'subscription'; text: string };
 export type Publish = (event: LiveEvent) => void;
 

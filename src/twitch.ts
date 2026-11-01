@@ -1,13 +1,14 @@
-import { RefreshingAuthProvider, exchangeCode, getTokenInfo, accessTokenIsExpired, refreshUserToken, type AccessToken } from '@twurple/auth';
+import { RefreshingAuthProvider, exchangeCode, getTokenInfo, type AccessToken } from '@twurple/auth';
 import { ChatClient } from '@twurple/chat';
 import type { FastifyInstance } from 'fastify';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Store } from './store.js';
 import { handleCommand, chatText, isCanonCommand } from './commands.js';
 import { createOAuthStates } from './oauth-state.js';
 import { registerEventSub } from './eventsub.js';
 import type { Publish } from './events.js';
+import { ConfigurationError, deadline, permanentFailure, readToken, retryTask, validateToken } from './reliability.js';
 
 export function registerTwitch(app: FastifyInstance, store: Store, port: number, publish: Publish) {
   const enabled = process.env.TWITCH_ENABLED === 'true';
@@ -40,10 +41,14 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
     if (userId !== activeUserId) return;
     try { save(token); } catch { status.message = 'Could not save refreshed token. Check data directory permissions.'; app.log.warn(status.message); }
   });
-  auth.onRefreshFailure(() => {
-    status.connected = status.authenticated = false;
-    status.message = 'Bot authorization expired or was revoked. Authorize the bot again.';
-    chat?.quit(); app.log.warn(status.message);
+  const recovery = retryTask(async () => { await startSaved(); });
+  auth.onRefreshFailure((_id, error) => {
+    if (permanentFailure(error)) {
+      status.connected = status.authenticated = false;
+      status.message = 'Bot authorization expired or was revoked. Authorize the bot again.';
+      chat?.quit();
+    } else { status.message = 'Token refresh temporarily unavailable; retrying while local mode stays available.'; recovery.schedule(); }
+    app.log.warn(status.message);
   });
   const scopes = ['chat:read', 'chat:edit'];
   // Twitch requires periodic token validation in addition to validation at startup.
@@ -51,13 +56,13 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
     if (!enabled || !activeUserId || busy || shuttingDown) return;
     void (async () => {
       try {
-        const token = await auth.getAccessTokenForUser(activeUserId!, scopes);
+        const token = await deadline(auth.getAccessTokenForUser(activeUserId!, scopes));
         if (!token) throw new Error('Missing bot token');
-        const info = await getTokenInfo(token.accessToken, clientId);
-        if (info.userId !== activeUserId || info.clientId !== clientId || !scopes.every(scope => info.scopes.includes(scope))) throw new Error('Invalid bot authorization');
-      } catch {
-        chat?.quit(); status.connected = status.authenticated = false;
-        status.message = 'Periodic bot authorization check failed. Check connectivity or reauthorize from the panel.';
+        const info = await deadline(getTokenInfo(token.accessToken, clientId));
+        if (info.userId !== activeUserId || info.clientId !== clientId || !scopes.every(scope => info.scopes.includes(scope))) throw new ConfigurationError('Invalid bot authorization');
+      } catch (error) {
+        if (permanentFailure(error)) { chat?.quit(); status.connected = status.authenticated = false; status.message = 'Bot authorization invalid. Reauthorize from the panel.'; }
+        else { status.message = 'Twitch validation temporarily unreachable. Retrying; local mode remains available.'; recovery.schedule(); }
         app.log.warn(status.message);
       }
     })();
@@ -65,16 +70,13 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
   validation.unref();
   async function connect(token: AccessToken) {
     if (shuttingDown) return;
-    // Validate identity before replacing a working bot's credentials or chat intent.
-    const valid = accessTokenIsExpired(token)
-      ? await refreshUserToken(clientId, clientSecret, token.refreshToken!) : token;
-    const info = await getTokenInfo(valid.accessToken, clientId);
-    if (info.clientId !== clientId || !info.userId || info.userName?.toLowerCase() !== expectedBot || !scopes.every(scope => info.scopes.includes(scope))) {
-      throw new Error('Unexpected bot identity or scopes');
-    }
+    const validated = await validateToken(token, clientId, clientSecret, expectedBot, scopes);
+    const valid = validated.token, info = validated.info;
     if (shuttingDown) return;
     save(valid);
-    activeUserId = await auth.addUserForToken(valid, ['chat']);
+    activeUserId = info.userId!;
+    auth.addUser(activeUserId, valid, ['chat']);
+    recovery.reset();
     chat?.quit();
     status.bot = info.userName!;
     status.connected = status.authenticated = false;
@@ -104,7 +106,7 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
       if (chat !== next) return;
       status.connected = false; status.message = 'Could not join chat. Check the channel login and bot access.';
     });
-    next.onMessageFailed(() => { status.message = 'Twitch rejected a reply. Check chat restrictions and bot permissions.'; });
+    next.onMessageFailed(() => { if (chat !== next) return; status.message = 'Twitch rejected a reply. Check chat restrictions and bot permissions.'; });
     // Keep outbound traffic modest even during a busy demo; Twurple also rate-limits sends.
     const recent = new Map<string, number>();
     let lastReply = 0;
@@ -122,7 +124,7 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
           app.log.info({ reply: chatText(reply) }, 'Canon chat reply');
           void next.say(channel, chatText(reply)).catch(() => { status.message = 'Could not send reply. Check Twitch connection and chat restrictions.'; app.log.warn(status.message); });
         }
-      } catch { app.log.warn('Could not process chat command; the server remains available.'); }
+      } catch { app.log.warn('Could not process chat command; the server remains available.'); void next.say(channel, 'Canon: Storage is temporarily unavailable. Please retry; the overlay remains available.').catch(() => {}); }
     });
     next.connect();
   }
@@ -131,7 +133,8 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
     if (!enabled || !configured) return reply.code(409).type('text/plain').send(status.message);
     if (busy) return reply.code(409).type('text/plain').send('Authorization is already being processed. Try again shortly.');
     // Use localhost consistently, so the browser-bound state cookie returns on callback.
-    const target = new URL(redirectUri);
+    let target: URL;
+    try { target = new URL(redirectUri); } catch { return reply.code(409).type('text/plain').send('Invalid redirect URL. Use http://localhost:' + port + '/auth/twitch/callback.'); }
     if (target.protocol !== 'http:' || target.hostname !== 'localhost' || target.port !== String(port) || target.pathname !== '/auth/twitch/callback') {
       return reply.code(409).type('text/plain').send('Use http://localhost:' + port + '/auth/twitch/callback as TWITCH_OAUTH_REDIRECT_URI and register it in Twitch.');
     }
@@ -154,7 +157,7 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
     if (busy) return reply.code(409).type('text/plain').send('Authorization in progress. Return to /panel.');
     busy = true;
     try {
-      const token = await exchangeCode(clientId, clientSecret, request.query.code, redirectUri);
+      const token = await deadline(exchangeCode(clientId, clientSecret, request.query.code, redirectUri));
       if (role === 'broadcaster') await eventsub.connect(token);
       else await connect(token);
       return reply.redirect('/panel');
@@ -165,25 +168,26 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
       return reply.code(400).type('text/plain').send(message);
     } finally { busy = false; }
   });
-  app.addHook('onClose', async () => { shuttingDown = true; clearInterval(validation); chat?.quit(); });
+  app.addHook('onClose', async () => { shuttingDown = true; clearInterval(validation); recovery.dispose(); chat?.quit(); });
+  async function startSaved() {
+    if (shuttingDown || !enabled || !configured || busy) return;
+    try {
+      const token = readToken(tokenPath);
+      busy = true;
+      await connect(token);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      if (permanentFailure(error)) status.message = 'Saved bot authorization is invalid or unreadable. Authorize the bot again from /panel.';
+      else { status.message = 'Twitch temporarily unreachable. Retrying bot connection; local mode remains available.'; recovery.schedule(); }
+      app.log.warn(status.message);
+    } finally { busy = false; }
+  }
   return {
-    status,
-    eventsub: eventsub.status,
+    status, eventsub: eventsub.status,
     async start() {
       if (!enabled || !configured) return;
-      // Separate auth providers preserve bot chat scopes when accounts are shared.
-      void eventsub.start();
-      try {
-        let token: AccessToken;
-        try { token = JSON.parse(readFileSync(tokenPath, 'utf8')); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-        if (!token || typeof token.accessToken !== 'string' || typeof token.refreshToken !== 'string' || !Array.isArray(token.scope) || typeof token.obtainmentTimestamp !== 'number' || (token.expiresIn !== null && typeof token.expiresIn !== 'number')) throw new Error('Invalid token file');
-        busy = true;
-        await connect(token);
-      } catch {
-        status.message = 'Saved bot authorization could not be loaded. Check credentials and authorize the bot again from /panel.';
-        app.log.warn(status.message);
-      } finally { busy = false; }
+      void eventsub.start().catch(() => app.log.warn('Broadcaster startup failed; local mode remains available.'));
+      await startSaved();
     }
   };
 }

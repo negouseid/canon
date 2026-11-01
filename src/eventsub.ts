@@ -1,10 +1,11 @@
 import { ApiClient } from '@twurple/api';
-import { EventSubWsListener } from '@twurple/eventsub-ws';
-import { RefreshingAuthProvider, getTokenInfo, accessTokenIsExpired, refreshUserToken, type AccessToken } from '@twurple/auth';
-import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
+import { RefreshingAuthProvider, getTokenInfo, type AccessToken } from '@twurple/auth';
+import { mkdirSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import type { Store } from './store.js';
 import { createEventHandlers, type Publish } from './events.js';
+import { startEventSession, eventTypes } from './eventsub-session.js';
+import { ConfigurationError, deadline, permanentFailure, readToken, retryTask, validateToken } from './reliability.js';
 
 export function registerEventSub(app: FastifyInstance, store: Store, publish: Publish) {
   const clientId = process.env.TWITCH_CLIENT_ID || '', clientSecret = process.env.TWITCH_CLIENT_SECRET || '';
@@ -19,9 +20,10 @@ export function registerEventSub(app: FastifyInstance, store: Store, publish: Pu
   };
   const auth = new RefreshingAuthProvider({ clientId, clientSecret });
   const handlers = createEventHandlers(store, rewardTitle, publish);
-  let listener: EventSubWsListener | undefined;
+  let listener: ReturnType<typeof startEventSession> | undefined;
   let userId: string | undefined;
   let closing = false;
+  let connecting = false;
   const tokenPath = 'data/twitch-broadcaster-token.json';
   function save(token: AccessToken) {
     mkdirSync('data', { recursive: true, mode: 0o700 });
@@ -36,93 +38,63 @@ export function registerEventSub(app: FastifyInstance, store: Store, publish: Pu
     if (id !== userId) return;
     try { save(token); } catch { status.message = 'Could not save refreshed broadcaster token. Check data directory permissions.'; app.log.warn(status.message); }
   });
-  auth.onRefreshFailure(() => unavailable('Broadcaster authorization expired or was revoked. Authorize the broadcaster again.'));
-  const required = ['channel.channel_points_custom_reward_redemption.add', 'channel.subscribe', 'channel.raid'];
-  function updateReady() {
-    status.ready = status.connected && required.every(type => status.subscriptions[type] === 'enabled');
-    status.message = status.ready ? 'EventSub ready: listening for redemptions, subscriptions, and incoming raids.' : 'EventSub connecting or partially available. Check subscription status below.';
-  }
+  auth.onRefreshFailure((_id, error) => { if (permanentFailure(error)) unavailable('Broadcaster authorization expired or was revoked. Authorize again.'); else { status.message = 'Token refresh temporarily unavailable; retrying.'; recovery.schedule(); } });
+  const recovery = retryTask(async () => { await startSaved(); });
   async function connect(token: AccessToken) {
-    const valid = accessTokenIsExpired(token) ? await refreshUserToken(clientId, clientSecret, token.refreshToken!) : token;
-    const info = await getTokenInfo(valid.accessToken, clientId);
-    if (!info.userId || info.clientId !== clientId || info.userName?.toLowerCase() !== channel || !scopes.every(scope => info.scopes.includes(scope))) throw new Error('Wrong broadcaster or scopes');
+    if (closing || connecting) return;
+    connecting = true;
+    try {
+    const validated = await validateToken(token, clientId, clientSecret, channel, scopes);
+    const valid = validated.token, info = validated.info;
     const configuredId = process.env.TWITCH_BROADCASTER_ID?.trim();
-    if (configuredId && configuredId !== info.userId) throw new Error('Broadcaster ID does not match channel');
+    if (configuredId && configuredId !== info.userId) throw new ConfigurationError('Broadcaster ID does not match channel');
     if (closing) return;
     save(valid);
-    userId = await auth.addUserForToken(valid);
+    userId = info.userId!;
+    auth.addUser(userId, valid);
     listener?.stop();
-    const apiClient = new ApiClient({ authProvider: auth, logger: { minLevel: 'error' } });
+    const apiClient = new ApiClient({ authProvider: auth, logger: { minLevel: 'error' }, fetchOptions: { get signal() { return AbortSignal.timeout(10_000); } } as object });
     status.broadcaster = info.userName!; status.authorized = true; status.connected = status.ready = false;
-    status.subscriptions = Object.fromEntries(required.map(type => [type, 'connecting']));
+    status.subscriptions = Object.fromEntries(eventTypes.map(type => [type, 'connecting']));
     status.message = 'Connecting broadcaster EventSub WebSocket…';
     // Reward inspection is advisory; all reward notifications are still filtered by exact title.
     try {
-      const rewards = await apiClient.channelPoints.getCustomRewards(userId);
+      const rewards = await deadline(apiClient.channelPoints.getCustomRewards(userId));
       const reward = rewards.find(item => item.title === rewardTitle);
       status.reward = !reward ? `Reward “${rewardTitle}” not found. Create it in Twitch.` : !reward.isEnabled || reward.isPaused || !reward.isInStock ? 'Found, but disabled, paused, or unavailable. Enable it in Twitch.' : 'Found and available';
     } catch { status.reward = 'Could not inspect rewards. Check channel eligibility and redemption permissions; event subscription results are below.'; }
     if (closing) return;
-    const next = new EventSubWsListener({ apiClient, logger: { minLevel: 'error' } });
-    listener = next;
-    next.onUserSocketConnect(() => { if (listener !== next) return; status.connected = true; updateReady(); });
-    next.onUserSocketDisconnect(() => { if (listener !== next) return; status.connected = status.ready = false; status.message = 'EventSub disconnected. Twurple will reconnect and restore subscriptions.'; });
-    next.onSubscriptionCreateSuccess((_subscription, apiSubscription) => {
-      if (listener !== next) return;
-      status.subscriptions[apiSubscription.type] = 'enabled'; updateReady();
-      app.log.info({ eventType: apiSubscription.type }, 'EventSub subscription enabled');
-    });
-    const subscriptionTypes = new Map<object, string>();
-    next.onSubscriptionCreateFailure((subscription, error) => {
-      if (listener !== next) return;
-      const type = subscriptionTypes.get(subscription) || 'unknown';
-      const code = (error as Error & { statusCode?: number }).statusCode;
-      status.subscriptions[type] = `failed${code ? ` (HTTP ${code})` : ''}: check channel eligibility/permissions and reauthorize`;
-      updateReady(); app.log.warn({ eventType: type, httpStatus: code }, 'EventSub subscription failed');
-    });
-    next.onRevoke((subscription, reason) => {
-      if (listener !== next) return;
-      status.subscriptions[subscriptionTypes.get(subscription) || 'unknown'] = `revoked: ${reason}`;
-      updateReady();
-    });
-    function safely(handle: () => void) {
-      if (listener !== next || closing) return;
-      try { handle(); } catch { status.lastEvent = 'Could not process an event; no partial database changes were saved.'; app.log.warn(status.lastEvent); }
-    }
-    const redemption = next.onChannelRedemptionAdd(userId, event => safely(() => {
-      const result = handlers.redemption(event);
-      if (!result || result.kind === 'duplicate') return;
-      status.lastEvent = result.kind === 'canonized' ? `CANONIZED: ${result.entry.term}` : `Redemption not canonized: ${result.reason} Manually refund this redemption in Twitch if needed.`;
-      app.log.info({ outcome: result.kind, redemptionId: event.id }, 'Canon redemption processed');
-    }));
-    const sub = next.onChannelSubscription(userId, event => safely(() => { handlers.subscription(event); status.lastEvent = `Subscription: ${event.userDisplayName}`; }));
-    const raid = next.onChannelRaidTo(userId, event => safely(() => { handlers.raid(event); status.lastEvent = `Raid: ${event.raidingBroadcasterDisplayName} (${event.viewers})`; }));
-    subscriptionTypes.set(redemption, required[0]); subscriptionTypes.set(sub, required[1]); subscriptionTypes.set(raid, required[2]);
-    next.start();
+    listener = startEventSession(apiClient, userId, status, handlers, app.log);
+    recovery.reset();
+    } finally { connecting = false; }
   }
+  // Recover even if the SDK exhausts its initial socket attempts or never receives welcome.
+  const connectionWatch = setInterval(() => {
+    const waitingForWelcome = Object.values(status.subscriptions).every(value => value === 'connecting' || value === 'reconnecting');
+    if (!closing && !connecting && status.authorized && (!status.connected || (!status.ready && waitingForWelcome))) recovery.schedule();
+  }, 30_000); connectionWatch.unref();
   const validation = setInterval(() => {
     if (!userId || !status.authorized || closing) return;
     void (async () => {
       try {
-        const token = await auth.getAccessTokenForUser(userId!, scopes);
+        const token = await deadline(auth.getAccessTokenForUser(userId!, scopes));
         if (!token) throw new Error('Missing token');
-        const info = await getTokenInfo(token.accessToken, clientId);
-        if (info.userId !== userId || info.clientId !== clientId || !scopes.every(scope => info.scopes.includes(scope))) throw new Error('Invalid token');
-      } catch { unavailable('Broadcaster token validation failed. Check connectivity and reauthorize from the panel.'); }
+        const info = await deadline(getTokenInfo(token.accessToken, clientId));
+        if (info.userId !== userId || info.clientId !== clientId || !scopes.every(scope => info.scopes.includes(scope))) throw new ConfigurationError('Invalid token');
+      } catch (error) { if (permanentFailure(error)) unavailable('Broadcaster authorization invalid. Reauthorize from the panel.'); else { status.message = 'Twitch validation temporarily unreachable. Retrying; local mode remains available.'; recovery.schedule(); } }
     })();
   }, 55 * 60_000); validation.unref();
-  app.addHook('onClose', async () => { closing = true; clearInterval(validation); listener?.stop(); });
-  return {
-    status, scopes, connect,
-    async start() {
-      if (!enabled || !clientId || !clientSecret || !channel) return;
-      try {
-        let token: AccessToken;
-        try { token = JSON.parse(readFileSync(tokenPath, 'utf8')); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-        if (!token || typeof token.accessToken !== 'string' || typeof token.refreshToken !== 'string' || !Array.isArray(token.scope) || typeof token.obtainmentTimestamp !== 'number' || (token.expiresIn !== null && typeof token.expiresIn !== 'number')) throw new Error('Invalid token file');
-        await connect(token);
-      } catch { unavailable('Saved broadcaster authorization could not be loaded. Authorize the broadcaster from the panel.'); }
+  app.addHook('onClose', async () => { closing = true; clearInterval(validation); clearInterval(connectionWatch); recovery.dispose(); listener?.stop(); });
+  async function startSaved() {
+    if (closing || !enabled || !clientId || !clientSecret || !channel) return;
+    try {
+      const token = readToken(tokenPath);
+      await connect(token);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      if (permanentFailure(error)) unavailable('Saved broadcaster authorization is invalid or unreadable. Authorize the broadcaster from the panel.');
+      else { status.message = 'Twitch temporarily unreachable. Retrying broadcaster connection; local mode remains available.'; recovery.schedule(); }
     }
-  };
+  }
+  return { status, scopes, connect, start: startSaved };
 }

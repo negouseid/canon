@@ -36,6 +36,24 @@ uses **3001** to avoid a port conflict. Set `PORT=3001` in `.env` if needed, res
 and use 3001 in every URL, including the Twitch redirect. `EADDRINUSE` means another
 process already uses the selected port; stop the old Canon instance or choose a free port.
 
+## Offline judge rehearsal
+
+No Twitch or OpenAI key is needed. In the panel, expand **Offline command rehearsal**
+under **Let chat write the first draft**. Run `!canon add Offline lore: Everything still works.`,
+approve it in Pending, watch the reveal, then run `!canon Offline lore` in the rehearsal
+input. Restart and query it again to verify persistence. These are clearly labeled
+local commands, using the real handler; they do not send Twitch messages or spend points.
+
+See the [failure-path audit](docs/RELIABILITY.md) for before/after behavior and tests.
+The suite now has **19 tests**, including forced EventSub disconnection/re-subscription
+and a complete offline child-process flow from `.env.example`. An intentional mock
+HTTP 503 log during the test is expected.
+
+If the database cannot open, the app starts a temporary seeded memory demo and shows a
+warning: changes in that mode do **not** survive restart. Runtime write errors return
+useful messages; last-known lore remains available. Twitch failures do not stop the
+local studio. The overlay reconnects and continues its ticker while offline.
+
 ## Connect Twitch
 
 ### 1. Register the application
@@ -186,7 +204,7 @@ overlays receive the current canon snapshot.
 
 Tokens refresh automatically, validate at startup/every 55 minutes, and are saved with
 owner-only permissions in ignored `data/twitch-bot-token.json` and
-`data/twitch-broadcaster-token.json`. OAuth state is browser-bound, single-use, and
+`data/twitch-broadcaster-token.json`. External auth work has a ten-second deadline and temporary network failures retry. OAuth state is browser-bound, single-use, and
 expires after ten minutes. Callback query strings are not logged.
 
 The server binds to loopback and accepts only local Host headers. Panel writes require

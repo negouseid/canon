@@ -6,7 +6,7 @@ let refreshing = false, refreshAgain = false, initialized = false;
 const reviewing = new Set();
 function message(id, text, error = false) { $(id).textContent = text; $(id).className = 'message' + (error ? ' error' : ''); }
 async function api(path, options = {}) {
-  const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', 'X-Canon-CSRF': state.csrf, ...options.headers } });
+  const response = await fetch(path, { signal: AbortSignal.timeout(8000), ...options, headers: { 'Content-Type': 'application/json', 'X-Canon-CSRF': state.csrf, ...options.headers } });
   let data; try { data = await response.json(); } catch { throw Error('Could not read the server response.'); }
   if (!response.ok) throw Error(data.error || data.message || 'Request failed. Try refreshing the panel.');
   return data;
@@ -39,7 +39,7 @@ function renderCanon() {
 async function refreshPanel() {
   if (refreshing) { refreshAgain = true; return; }
   refreshing = true;
-  try { const previous = state; state = await api('/api/panel'); if (!initialized || JSON.stringify(previous.pending) !== JSON.stringify(state.pending)) renderPending(); if (!initialized || JSON.stringify(previous.canon) !== JSON.stringify(state.canon)) renderCanon(); $('rejectedCount').textContent = state.rejectedCount; initialized = true; $('syncStatus').textContent = 'Memory synced · ' + new Date().toLocaleTimeString(); }
+  try { const previous = state; const incoming = await api('/api/panel'); if (!incoming || !Array.isArray(incoming.pending) || !Array.isArray(incoming.canon)) throw Error('Invalid panel snapshot. Retrying.'); state = incoming; $('storageMessage').textContent = state.storage?.warning || ''; if (!initialized || JSON.stringify(previous.pending) !== JSON.stringify(state.pending)) renderPending(); if (!initialized || JSON.stringify(previous.canon) !== JSON.stringify(state.canon)) renderCanon(); $('rejectedCount').textContent = state.rejectedCount; initialized = true; $('syncStatus').textContent = 'Memory synced · ' + new Date().toLocaleTimeString(); }
   catch (error) { message('panelMessage', error.message, true); }
   finally { refreshing = false; if (refreshAgain) { refreshAgain = false; void refreshPanel(); } }
 }
@@ -69,6 +69,7 @@ $('saveVoice').onclick = async () => {
 };
 window.addEventListener('beforeunload', event => { if (voiceDirty()) { event.preventDefault(); event.returnValue = ''; } });
 $('search').oninput = renderCanon;
+$('runDemo').onclick = async () => { $('runDemo').disabled = true; try { const result = await api('/api/panel/rehearse', { method: 'POST', body: JSON.stringify({ command: $('demoCommand').value }) }); message('demoReply', result.reply); await refreshPanel(); } catch (error) { message('demoReply', error.message, true); } finally { $('runDemo').disabled = false; } };
 $('overlayUrl').textContent = location.origin + '/overlay';
 $('fire').onclick = async () => { $('fire').disabled = true; try { const data = await api('/api/test-canonized', { method: 'POST', body: '{}' }); message('testMessage', 'TEST reveal sent: ' + data.entry.term); } catch (error) { message('testMessage', error.message, true); } finally { setTimeout(() => $('fire').disabled = false, 1500); } };
 function pill(id, active, text) { $(id).textContent = text; $(id).className = 'pill' + (active ? ' live' : ''); }
@@ -86,9 +87,11 @@ async function updateTwitch() {
 let retry = 1000;
 function connect() {
   const socket = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-  socket.onopen = () => { retry = 1000; $('overlayStatus').textContent = 'Live connection'; void refreshPanel(); };
-  socket.onmessage = ({ data }) => { let event; try { event = JSON.parse(data); } catch { return; } if (event.type === 'pending-changed' || event.type === 'snapshot') void refreshPanel(); };
-  socket.onclose = () => { $('overlayStatus').textContent = 'Reconnecting'; setTimeout(connect, retry); retry = Math.min(retry * 2, 15000); };
+  let lastMessage = Date.now();
+  const watchdog = setInterval(() => { if (Date.now() - lastMessage > 35_000) socket.close(); }, 5000);
+  socket.onopen = () => { retry = 1000; lastMessage = Date.now(); $('overlayStatus').textContent = 'Live connection'; void refreshPanel(); };
+  socket.onmessage = ({ data }) => { const event = CanonLive.parse(data); if (!event) return; lastMessage = Date.now(); if (event.type === 'pending-changed' || event.type === 'snapshot') void refreshPanel(); };
+  socket.onclose = () => { clearInterval(watchdog); $('overlayStatus').textContent = 'Reconnecting'; setTimeout(connect, retry); retry = Math.min(retry * 2, 15000); };
   socket.onerror = () => socket.close();
 }
 void refreshPanel().then(loadVoice); void updateTwitch(); connect();

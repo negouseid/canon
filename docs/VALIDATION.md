@@ -1,4 +1,8 @@
-# Final verification — November 1, 2026
+# Verification — November 1, 2026
+
+The later [reliability pass](RELIABILITY.md) expands this baseline to 19 tests, including
+forced EventSub reconnects and a full offline workflow. The results below describe the
+original pre-pass release.
 
 Environment: macOS, Node.js 24.22.1, npm 11.19.1.
 

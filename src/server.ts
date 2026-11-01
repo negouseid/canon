@@ -1,16 +1,15 @@
 import 'dotenv/config';
 import Fastify, { LogController } from 'fastify';
 import { readFileSync } from 'node:fs';
-import { WebSocketServer, WebSocket } from 'ws';
-import { openStore } from './store.js';
-import { seed } from './seed.js';
+import { createRuntimeStore, StorageUnavailable } from './runtime-store.js';
+import { createLiveHub } from './live-hub.js';
 import { registerTwitch } from './twitch.js';
 import { registerPanel } from './panel.js';
-import type { Publish } from './events.js';
-const port = Number(process.env.PORT || 3000);
-if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 to 65535');
-const store = openStore(process.env.DATABASE_PATH || './data/canon.sqlite');
-if (process.env.SEED_ON_START !== 'false') seed(store);
+const requestedPort = Number(process.env.PORT || 3000);
+if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) { console.error('PORT is invalid; using 3000.'); }
+const port = Number.isInteger(requestedPort) && requestedPort >= 1 && requestedPort <= 65535 ? requestedPort : 3000;
+const runtime = createRuntimeStore(process.env.DATABASE_PATH || './data/canon.sqlite', process.env.SEED_ON_START !== 'false');
+const { store } = runtime;
 // OAuth callback query strings contain authorization codes: do not log request URLs.
 const app = Fastify({ logger: true, logController: new LogController({ disableRequestLogging: true }) });
 app.addHook('onRequest', async (request, reply) => {
@@ -18,50 +17,46 @@ app.addHook('onRequest', async (request, reply) => {
   if (!allowedHosts.has(request.headers.host || '')) return reply.code(403).send({ error: 'Local access only' });
   reply.header('Referrer-Policy', 'no-referrer');
 });
-const ws = new WebSocketServer({ noServer: true });
-const publish: Publish = event => {
-  const message = JSON.stringify(event);
-  for (const client of ws.clients) if (client.readyState === WebSocket.OPEN) client.send(message);
-};
+const hub = createLiveHub(app.server, store, port, app.log);
+const publish = hub.publish;
 const twitch = registerTwitch(app, store, port, publish);
-registerPanel(app, store, publish);
-app.server.on('upgrade', (request, socket, head) => {
-  const origin = request.headers.origin;
-  const host = request.headers.host;
-  if (request.url !== '/ws' || ![`localhost:${port}`, `127.0.0.1:${port}`].includes(host || '') || origin !== `http://${host}`) {
-    socket.destroy(); return;
-  }
-  ws.handleUpgrade(request, socket, head, client => ws.emit('connection', client, request));
+registerPanel(app, store, publish, undefined, runtime.status);
+app.setErrorHandler((error, _request, reply) => {
+  if (error instanceof StorageUnavailable) return reply.code(503).send({ error: error.message });
+  return reply.send(error);
 });
-ws.on('connection', client => {
-  client.on('error', error => app.log.warn(error));
-  client.send(JSON.stringify({ type: 'snapshot', entries: store.list() }));
-});
-app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 7, twitchConnected: twitch.status.connected, eventsubReady: twitch.eventsub.ready }));
+app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 7, twitchConnected: twitch.status.connected, eventsubReady: twitch.eventsub.ready, storage: runtime.status, voiceMode: 'plain-text' }));
 app.get('/api/canon', async () => store.list());
 app.get('/', async (_, reply) => reply.redirect('/panel'));
 for (const page of ['overlay', 'panel']) {
   const html = readFileSync(new URL(`../public/${page}.html`, import.meta.url), 'utf8');
   app.get('/' + page, async (_, reply) => reply.type('text/html').send(html));
 }
-const panelScript = readFileSync(new URL('../public/panel.js', import.meta.url), 'utf8');
-app.get('/panel.js', async (_, reply) => reply.type('application/javascript').send(panelScript));
+for (const script of ['panel.js', 'live-message.js']) {
+  const body = readFileSync(new URL('../public/' + script, import.meta.url), 'utf8');
+  app.get('/' + script, async (_, reply) => reply.type('application/javascript').send(body));
+}
 app.post('/api/test-canonized', { config: {}, bodyLimit: 1024 }, async (request, reply) => {
   // Browser JSON requests require a same-origin preflight; verify Origin when present too.
   if (!request.headers['content-type']?.startsWith('application/json')) return reply.code(415).send({ error: 'Use application/json' });
   if (request.headers.origin && request.headers.origin !== `http://${request.headers.host}`) return reply.code(403).send({ error: 'Origin rejected' });
   const entry = store.random();
   if (!entry) return reply.code(409).send({ error: 'No canon entries. Run npm run seed first.' });
-  const message = JSON.stringify({ type: 'canonized', entry, test: true });
-  let clients = 0;
-  for (const client of ws.clients) if (client.readyState === WebSocket.OPEN) { client.send(message); clients++; }
+  const clients = publish({ type: 'canonized', entry, test: true });
   return { entry, clients };
 });
-app.addHook('preClose', async () => { for (const client of ws.clients) client.terminate(); ws.close(); });
+app.addHook('preClose', async () => { hub.close(); });
 app.addHook('onClose', async () => { store.close(); });
-for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { void app.close(); });
+let stopping = false;
+for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => {
+  if (stopping) return;
+  stopping = true;
+  // Intentional shutdown: finish application cleanup, then release SDK housekeeping timers.
+  void app.close().then(() => process.exit(0), () => process.exit(1));
+});
 try {
   await app.listen({ port, host: '127.0.0.1' });
-  void twitch.start();
+  if (runtime.status.warning) app.log.warn(runtime.status.warning);
+  void twitch.start().catch(() => app.log.warn('Twitch startup failed; local mode remains available.'));
 }
 catch (error) { app.log.error(error); await app.close(); process.exitCode = 1; }

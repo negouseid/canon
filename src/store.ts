@@ -13,6 +13,8 @@ export type NewEntry = Pick<Entry, 'term' | 'definition' | 'author' | 'sourceEve
 export function openStore(path: string) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
+  try {
+  db.pragma('busy_timeout = 1000');
   db.pragma('journal_mode = WAL');
   db.exec(`CREATE TABLE IF NOT EXISTS entries (
     id INTEGER PRIMARY KEY, term TEXT NOT NULL CHECK(length(trim(term)) BETWEEN 1 AND 100),
@@ -25,6 +27,7 @@ export function openStore(path: string) {
       id TEXT PRIMARY KEY, entryId INTEGER REFERENCES entries(id), outcome TEXT NOT NULL,
       createdAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );`);
+  } catch (error) { db.close(); throw error; }
   const canonize = db.transaction((event: Redemption): RedemptionResult => {
     const source = `redemption:${event.id}`;
     const claimed = db.prepare("INSERT INTO event_receipts(id, outcome) VALUES (?, 'processing') ON CONFLICT(id) DO NOTHING").run(source);
@@ -42,7 +45,7 @@ export function openStore(path: string) {
     } else {
       const colon = input.indexOf(':');
       const term = input.slice(0, colon).trim(), definition = input.slice(colon + 1).trim();
-      if (colon < 1 || !term || !definition || term.length > 100 || definition.length > 1000) return reject('Use term: definition (term up to 100 characters; definition up to 1000), or latest.');
+      if (/[\x00-\x1f\x7f]/.test(input) || colon < 1 || !term || !definition || term.length > 100 || definition.length > 1000) return reject('Use term: definition (term up to 100 characters; definition up to 1000), or latest.');
       entry = db.prepare("INSERT INTO entries(term, definition, author, sourceEvent, status) VALUES (?, ?, ?, ?, 'canon') RETURNING *")
         .get(term, definition, event.author, source) as Entry;
     }
