@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { openStore } from './store.js';
 import { seed } from './seed.js';
 import { registerTwitch } from './twitch.js';
+import type { Publish } from './events.js';
 const port = Number(process.env.PORT || 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 to 65535');
 const store = openStore(process.env.DATABASE_PATH || './data/canon.sqlite');
@@ -16,8 +17,12 @@ app.addHook('onRequest', async (request, reply) => {
   if (!allowedHosts.has(request.headers.host || '')) return reply.code(403).send({ error: 'Local access only' });
   reply.header('Referrer-Policy', 'no-referrer');
 });
-const twitch = registerTwitch(app, store, port);
 const ws = new WebSocketServer({ noServer: true });
+const publish: Publish = event => {
+  const message = JSON.stringify(event);
+  for (const client of ws.clients) if (client.readyState === WebSocket.OPEN) client.send(message);
+};
+const twitch = registerTwitch(app, store, port, publish);
 app.server.on('upgrade', (request, socket, head) => {
   const origin = request.headers.origin;
   const host = request.headers.host;
@@ -30,7 +35,7 @@ ws.on('connection', client => {
   client.on('error', error => app.log.warn(error));
   client.send(JSON.stringify({ type: 'snapshot', entries: store.list() }));
 });
-app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 3, twitchConnected: twitch.status.connected }));
+app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 4, twitchConnected: twitch.status.connected, eventsubReady: twitch.eventsub.ready }));
 app.get('/api/canon', async () => store.list());
 app.get('/', async (_, reply) => reply.redirect('/panel'));
 for (const page of ['overlay', 'panel']) {

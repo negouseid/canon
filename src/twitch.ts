@@ -6,8 +6,10 @@ import { dirname, resolve } from 'node:path';
 import type { Store } from './store.js';
 import { handleCommand, chatText, isCanonCommand } from './commands.js';
 import { createOAuthStates } from './oauth-state.js';
+import { registerEventSub } from './eventsub.js';
+import type { Publish } from './events.js';
 
-export function registerTwitch(app: FastifyInstance, store: Store, port: number) {
+export function registerTwitch(app: FastifyInstance, store: Store, port: number, publish: Publish) {
   const enabled = process.env.TWITCH_ENABLED === 'true';
   const clientId = process.env.TWITCH_CLIENT_ID || '';
   const clientSecret = process.env.TWITCH_CLIENT_SECRET || '';
@@ -17,6 +19,8 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number)
   // Keep tokens inside the already-ignored data directory, separate from public assets.
   const tokenPath = resolve('data/twitch-bot-token.json');
   const states = createOAuthStates();
+  const broadcasterStates = createOAuthStates();
+  const eventsub = registerEventSub(app, store, publish);
   const configured = Boolean(clientId && clientSecret && /^[a-z0-9_]{1,25}$/.test(channel) && /^[a-z0-9_]{1,25}$/.test(expectedBot));
   const status = { enabled, configured, connected: false, authenticated: false, bot: '', channel,
     message: !enabled ? 'Local mode. Set TWITCH_ENABLED=true to connect chat.' : !configured ? 'Set client ID, client secret, channel, and TWITCH_BOT_USERNAME in .env, then restart.' : 'Authorize your bot account to connect chat.',
@@ -122,8 +126,8 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number)
     });
     next.connect();
   }
-  app.get('/api/twitch/status', async () => ({ ...status, botExpected: expectedBot }));
-  app.get('/auth/twitch/bot', async (request, reply) => {
+  app.get('/api/twitch/status', async () => ({ ...status, botExpected: expectedBot, eventsub: eventsub.status }));
+  for (const role of ['bot', 'broadcaster'] as const) app.get('/auth/twitch/' + role, async (request, reply) => {
     if (!enabled || !configured) return reply.code(409).type('text/plain').send(status.message);
     if (busy) return reply.code(409).type('text/plain').send('Authorization is already being processed. Try again shortly.');
     // Use localhost consistently, so the browser-bound state cookie returns on callback.
@@ -131,10 +135,10 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number)
     if (target.protocol !== 'http:' || target.hostname !== 'localhost' || target.port !== String(port) || target.pathname !== '/auth/twitch/callback') {
       return reply.code(409).type('text/plain').send('Use http://localhost:' + port + '/auth/twitch/callback as TWITCH_OAUTH_REDIRECT_URI and register it in Twitch.');
     }
-    if (request.headers.host !== target.host) return reply.redirect(`http://${target.host}/auth/twitch/bot`);
-    const state = states.issue();
+    if (request.headers.host !== target.host) return reply.redirect(`http://${target.host}/auth/twitch/${role}`);
+    const state = (role === 'bot' ? states : broadcasterStates).issue();
     const url = new URL('https://id.twitch.tv/oauth2/authorize');
-    url.search = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: scopes.join(' '), state, force_verify: 'true' }).toString();
+    url.search = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: (role === 'bot' ? scopes : eventsub.scopes).join(' '), state, force_verify: 'true' }).toString();
     reply.header('Set-Cookie', `canon_oauth_state=${state}; HttpOnly; SameSite=Lax; Path=/auth/twitch; Max-Age=600`);
     reply.header('Cache-Control', 'no-store');
     return reply.redirect(url.toString());
@@ -143,25 +147,32 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number)
     reply.header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer');
     const cookie = request.headers.cookie?.split(';').map(part => part.trim()).find(part => part.startsWith('canon_oauth_state='))?.slice('canon_oauth_state='.length);
     reply.header('Set-Cookie', 'canon_oauth_state=; HttpOnly; SameSite=Lax; Path=/auth/twitch; Max-Age=0');
-    if (!enabled || !configured || !states.consume(request.query.state || '', cookie)) return reply.code(400).type('text/plain').send('Authorization expired or state did not match. Start again from /panel.');
+    const state = request.query.state || '';
+    const role = broadcasterStates.consume(state, cookie) ? 'broadcaster' : states.consume(state, cookie) ? 'bot' : undefined;
+    if (!enabled || !configured || !role) return reply.code(400).type('text/plain').send('Authorization expired or state did not match. Start again from /panel.');
     if (request.query.error || !request.query.code) return reply.code(400).type('text/plain').send('Authorization was declined. You can retry from /panel.');
     if (busy) return reply.code(409).type('text/plain').send('Authorization in progress. Return to /panel.');
     busy = true;
     try {
       const token = await exchangeCode(clientId, clientSecret, request.query.code, redirectUri);
-      await connect(token);
+      if (role === 'broadcaster') await eventsub.connect(token);
+      else await connect(token);
       return reply.redirect('/panel');
     } catch {
-      status.message = 'Could not authorize bot. Verify app credentials, redirect URL, and that you signed in as TWITCH_BOT_USERNAME. Retry from /panel.';
-      app.log.warn(status.message);
-      return reply.code(400).type('text/plain').send(status.message);
+      const message = role === 'broadcaster' ? 'Could not authorize broadcaster. Sign in as TWITCH_CHANNEL and grant redemption/subscription permissions. Check app credentials and optional broadcaster ID.' : 'Could not authorize bot. Verify app credentials, redirect URL, and that you signed in as TWITCH_BOT_USERNAME. Retry from /panel.';
+      if (role === 'broadcaster') eventsub.status.message = message; else status.message = message;
+      app.log.warn(message);
+      return reply.code(400).type('text/plain').send(message);
     } finally { busy = false; }
   });
   app.addHook('onClose', async () => { shuttingDown = true; clearInterval(validation); chat?.quit(); });
   return {
     status,
+    eventsub: eventsub.status,
     async start() {
       if (!enabled || !configured) return;
+      // Separate auth providers preserve bot chat scopes when accounts are shared.
+      void eventsub.start();
       try {
         let token: AccessToken;
         try { token = JSON.parse(readFileSync(tokenPath, 'utf8')); }

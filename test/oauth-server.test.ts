@@ -46,6 +46,17 @@ test('OAuth HTTP flow binds state to a cookie, rejects callbacks, and keeps code
     assert.equal(denied.status, 400);
     assert.match(await denied.text(), /declined/);
     assert.equal((await fetch(base + '/auth/twitch/callback?state=' + state, { headers: { cookie } })).status, 400);
+    const broadcaster = await fetch(base + '/auth/twitch/broadcaster', { redirect: 'manual' });
+    assert.equal(broadcaster.status, 302);
+    const broadcasterUrl = new URL(broadcaster.headers.get('location')!);
+    assert.equal(broadcasterUrl.searchParams.get('scope'), 'channel:read:redemptions channel:read:subscriptions');
+    assert.equal(broadcasterUrl.searchParams.get('redirect_uri'), base + '/auth/twitch/callback');
+    const broadcasterCookie = broadcaster.headers.get('set-cookie')!.split(';')[0];
+    const broadcasterState = broadcasterUrl.searchParams.get('state')!;
+    const rejected = await fetch(base + '/auth/twitch/callback?state=' + broadcasterState + '&error=access_denied', { headers: { cookie: broadcasterCookie } });
+    assert.equal(rejected.status, 400);
+    assert.match(await rejected.text(), /declined/);
+    assert.equal((await (await fetch(base + '/api/twitch/status')).json()).eventsub.authorized, false);
     assert.equal(logs.includes('do-not-log-this'), false);
     assert.equal(logs.includes('test-secret'), false);
   } finally {

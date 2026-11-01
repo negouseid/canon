@@ -2,11 +2,11 @@
 
 Your channel remembers. A persistent Twitch lore keeper built for Codex x TwitchCon.
 
-## Current build: step 3 of 7
+## Current build: step 4 of 7
 
 Working: TypeScript server, SQLite canon/pending storage, eight fictional sample entries,
 transparent overlay, rotating ticker, reconnecting WebSocket, and local demo studio.
-Authenticated Twitch chat and bot OAuth are implemented. Live connection requires your app credentials and bot authorization. EventSub and voice rewriting are next; panel moderation arrives in step 5.
+Authenticated Twitch chat and bot OAuth are implemented. Live connection requires your app credentials and bot authorization. EventSub WebSocket integration is implemented; broadcaster authorization and a real redemption verify the live flow. Voice rewriting is next; panel moderation arrives in step 5.
 
 ## Try the overlay
 
@@ -34,7 +34,7 @@ npm start
 
 Open http://127.0.0.1:3000 for the demo studio.
 http://127.0.0.1:3000/api/canon returns eight sample entries.
-http://127.0.0.1:3000/health reports `ok: true`, `canonCount: 8`, and `stage: 3`.
+http://127.0.0.1:3000/health reports `ok: true`, `canonCount: 8`, and `stage: 4`.
 No Twitch or OpenAI credentials are required for this step.
 
 ```sh
@@ -76,7 +76,7 @@ backup API or stop the app before copying the database and any WAL sidecar files
    and leave the reward enabled and unpaused. Reward title must match
    `TWITCH_REWARD_TITLE` exactly. If Channel Points are unavailable, you can test locally
    but cannot demonstrate the required live redemption until an eligible channel is used.
-8. Authorize the bot now using the instructions below. Broadcaster OAuth arrives in step 4. After step 4,
+8. Authorize the bot now using the instructions below. Use the panel’s **Authorize broadcaster** link for broadcaster OAuth. After step 4,
    redeem the reward with `term: definition` and verify the overlay reacts. The same
    step will define how plain text and the latest pending proposal are handled.
 
@@ -95,7 +95,7 @@ Official references:
 1. Scaffold + SQLite + seeds (complete).
 2. Transparent 1920×1080 `/overlay`, WebSocket updates, local test reveal (complete).
 3. Authenticated chat: `!canon term`, `!canon add term: definition`, `!lore` (implemented; authorize your bot to verify live).
-4. EventSub WebSocket: Canonize this reward, subscriptions, incoming raids.
+4. EventSub WebSocket: Canonize this reward, subscriptions, incoming raids (implemented; authorize broadcaster to verify live).
 5. Local `/panel`: approve/reject, browse canon, edit `voice.md`.
 6. Optional OpenAI rewriting with timeout and plain-text fallback.
 7. Animation polish, complete clean-clone instructions, Devpost text, <3-minute shot list.
@@ -166,3 +166,60 @@ needed. OAuth callback query strings are not logged.
 
 Live Twitch verification still requires authorization by the bot account owner;
 unit tests verify command storage and OAuth state boundaries without contacting Twitch.
+
+## Connect Channel Points and EventSub (step 4)
+
+No extra redirect URL is needed: bot and broadcaster authorization both use
+`http://localhost:3001/auth/twitch/callback` when PORT=3001. Their credentials are kept
+in separate local files/providers, so using the same Twitch account for both roles
+preserves chat access.
+
+1. Restart Canon (`Ctrl+C`, then `npm start`). Open `/panel` and find
+   **Channel Points & Live Events**.
+2. Click **Authorize broadcaster**. Sign in as the owner of `TWITCH_CHANNEL`, grant
+   `channel:read:redemptions` and `channel:read:subscriptions`, and return to the panel.
+   Incoming raids need no extra scope. This authorization is separate from bot chat
+   authorization, even if the same account is used. Numeric broadcaster ID is resolved
+   from the validated token; leave `TWITCH_BROADCASTER_ID` blank unless setting it explicitly.
+3. Wait for **EventSub ready**. All three event subscriptions should show `enabled`:
+   `channel.channel_points_custom_reward_redemption.add`, `channel.subscribe`, and
+   `channel.raid`. The reward check should report **Found and available**.
+   A failed subscription shows a status message; chat and the local overlay keep running.
+4. Keep `/overlay?preview`, the panel’s preview, or the OBS Browser Source open.
+5. Propose lore from Twitch chat:
+   `!canon add Moon cheese: The moon sponsors our snacks.`
+   Then redeem **Canonize this** with viewer text `latest`.
+6. Expect the real **CANONIZED** reveal (no TEST label), **CANONIZED: Moon cheese**
+   in the panel, and `!canon Moon cheese` to return the stored definition.
+   Alternatively, redeem with `Door boss: Every door is the final boss.` to create canon
+   directly from the redemption. Wait at least five seconds between chat commands.
+7. Restart Canon and query the same term again to demonstrate persistence.
+
+The exact configured reward title is matched; other rewards and canceled redemptions
+are ignored. `latest` (or empty input if permitted by your reward settings) promotes
+the newest pending proposal and preserves its original author/source. Any other input
+must be `term: definition`, with a term up to 100 characters and definition up to 1000.
+Invalid submissions or an empty pending queue do not create canon. The panel explains
+what happened; manually refund/reject unsuccessful redemptions in Twitch if appropriate.
+The app only reads redemptions and does not fulfill or refund them automatically.
+
+Canon records each handled redemption ID in SQLite in the same transaction as the
+lore change. Duplicate deliveries, including after restart, cannot promote another
+proposal or replay the animation. Failed inputs are recorded too, preventing a late
+redelivery from promoting a later proposal. The newest snapshot includes newly stored
+canon so it joins the rotating ticker. Transient animations are not replayed after a
+server restart or to overlays that connect after the event.
+
+Subscriptions produce a welcome ticker message; incoming raids produce a welcome
+burst containing a random piece of stored lore. Those community events do not create
+canon. Twurple handles WebSocket reconnects and transport-level message deduplication.
+Subscription status and the last received event appear in the panel. A real sub/raid
+still needs a live Twitch event to verify end to end; automated tests exercise their
+handlers and ticker payloads without buying subscriptions or sending raids.
+
+Broadcaster tokens refresh automatically and are validated at startup and every 55
+minutes, saved owner-only in ignored `data/twitch-broadcaster-token.json`. Invalid or
+revoked authorization leaves the overlay/chat available and prompts reauthorization.
+Channel Points creation requires creator tools to be enabled; after onboarding Twitch
+says activation may take up to 24 hours. See the
+[Channel Points FAQ](https://help.twitch.tv/s/article/channel-points-faq?language=en_US).
