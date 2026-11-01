@@ -150,8 +150,8 @@ account and register your confidential Twitch application as described above.
 
 Replies appear in both the server console and Twitch chat, prefixed `Canon:` and
 limited to 450 characters. Commands have a five-second per-user cooldown and a
-1.5-second global cooldown; commands during cooldown are ignored. Normal conversation
-and the bot’s own messages are ignored. Twurple also applies outbound rate limits.
+1.5-second global cooldown; commands during cooldown are ignored. Normal conversation and Canon-prefixed replies are ignored. Commands sent manually
+from the bot account are accepted, including when broadcaster and bot share one account. Twurple also applies outbound rate limits.
 If chat is follower/subscriber restricted, adjust your test channel settings yourself
 or grant the bot the appropriate access. Moderator status is not required for normal
 unrestricted chat.

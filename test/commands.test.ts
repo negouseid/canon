@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openStore } from '../src/store.js';
-import { handleCommand, chatText } from '../src/commands.js';
+import { handleCommand, chatText, isCanonCommand } from '../src/commands.js';
 import { createOAuthStates } from '../src/oauth-state.js';
 
 test('chat commands persist proposals, hide pending lore, and deduplicate message delivery', () => {
@@ -40,4 +40,18 @@ test('OAuth state is browser-bound, single-use, and expires after ten minutes', 
   now = 600_001;
   assert.equal(states.consume(second, second), false);
   assert.equal(states.consume('invented', 'invented'), false);
+});
+
+test('same-account commands are accepted while bot replies never trigger a command loop', () => {
+  const store = openStore(':memory:');
+  try {
+    store.add({ term: 'The Chair Council', definition: 'The chair rules.', author: 'demo', sourceEvent: 'seed:test' }, 'canon');
+    const command = '!canon The Chair Council';
+    assert.equal(isCanonCommand(command), true);
+    const reply = handleCommand(store, command, 'neverstreaminggoo', 'self-test')!;
+    assert.equal(reply, 'The Chair Council: The chair rules.');
+    assert.equal(isCanonCommand(chatText(reply)), false);
+    assert.equal(isCanonCommand(chatText('!lore')), false);
+    assert.equal(isCanonCommand('!canonical'), false);
+  } finally { store.close(); }
 });

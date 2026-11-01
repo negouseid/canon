@@ -1,5 +1,10 @@
 import type { Store } from './store.js';
 
+/** Replies start with Canon:, so commands from the bot account are safe to accept. */
+export function isCanonCommand(text: string): boolean {
+  return /^!(canon(?:\s|$)|lore$)/i.test(text.trim());
+}
+
 /** Return a response only for recognized commands. Proposals never become canon here. */
 export function handleCommand(store: Store, text: string, author: string, messageId: string): string | undefined {
   const input = text.trim();

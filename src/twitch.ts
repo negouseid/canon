@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Store } from './store.js';
-import { handleCommand, chatText } from './commands.js';
+import { handleCommand, chatText, isCanonCommand } from './commands.js';
 import { createOAuthStates } from './oauth-state.js';
 
 export function registerTwitch(app: FastifyInstance, store: Store, port: number) {
@@ -105,7 +105,7 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number)
     const recent = new Map<string, number>();
     let lastReply = 0;
     next.onMessage((_room, user, text, message) => {
-      if (chat !== next || !status.connected || user.toLowerCase() === expectedBot || !/^!(canon(?:\s|$)|lore$)/i.test(text.trim())) return;
+      if (chat !== next || !status.connected || !isCanonCommand(text)) return;
       const now = Date.now();
       const userId = message.userInfo.userId || user;
       if (now - (recent.get(userId) || 0) < 5000 || now - lastReply < 1500) return;
