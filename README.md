@@ -5,36 +5,117 @@ moments into persistent, queryable channel lore. Viewers propose entries in chat
 spend Channel Points to canonize them. A transparent OBS overlay celebrates each new
 entry, and the streamer keeps control through a local moderation panel.
 
-## Run from a clean clone
+## Prerequisites and repository access
 
-Requires **Node.js 22.12+** and npm; tested locally with Node 24.
+- **Git** ([installer](https://git-scm.com/downloads)) and **Node.js 24** with npm
+  ([installer](https://nodejs.org/en/download)). Node 22.12+ is supported; Node 24 is
+  the version tested for this build. Open a new terminal after installation.
+- A current browser. OBS Studio is optional for local testing; install it from
+  [obsproject.com](https://obsproject.com/download) to test Browser Sources.
+- Internet for cloning and installing dependencies. After installation, local demo
+  mode works without internet, Twitch credentials, or an OpenAI key.
+- Keep the terminal/server and OBS on the **same computer**. `127.0.0.1` means the
+  computer opening the URL; this build is not a public-hosted or LAN-access service.
+
+Check installation:
+
+```sh
+git --version
+node --version
+npm --version
+```
+
+**This repository is private by the owner's choice.** A judge must receive and accept
+an invitation before cloning. Owner: repository **Settings → Collaborators** (or
+**Collaborators and teams / Manage access**) → **Add people**, enter the judge's exact
+GitHub username, and send the invitation. Judge: sign in to that GitHub account,
+accept the invitation from GitHub notifications/email, and confirm you can open
+[negouseid/canon](https://github.com/negouseid/canon). A private-repository 404 or
+`Repository not found` can mean access is missing, rather than a broken URL.
+
+If Git is not authenticated, install the optional [GitHub CLI](https://cli.github.com/),
+then run:
+
+```sh
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git
+```
+
+Complete the browser login using the **invited account**. This avoids manually creating
+or pasting a GitHub token. Existing authenticated Git/SSH setups can be used instead.
+A normal GitHub account password is not a Git HTTPS password.
+[GitHub invitation instructions](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/repository-access-and-collaboration/inviting-collaborators-to-a-personal-repository).
+
+## First run: no credentials needed
+
+Clone and install (Terminal, PowerShell, or Git Bash):
 
 ```sh
 git clone https://github.com/negouseid/canon.git
 cd canon
-npm ci
+npm ci --include=dev
+```
+
+Copy the example configuration **once**, before editing your own `.env`:
+
+macOS/Linux Terminal or Git Bash:
+
+```sh
 cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Leave the copied values unchanged for the offline demo. Edit **`.env`**, not
+`.env.example`, when connecting Twitch. On Windows, make sure the filename is `.env`,
+not `.env.txt`. Do not copy the example over a configured file on subsequent starts.
+
+The single start command, run inside the `canon` directory, is:
+
+```sh
 npm start
 ```
 
-Open [the studio](http://127.0.0.1:3000/panel). You should see **8 canon entries**,
-an empty pending queue, an overlay preview, and offline Twitch indicators. Click
-**Fire test CANONIZED** to see the nine-second reveal. Local mode needs no Twitch
-credentials, OpenAI key, or external database. Test reveals never modify stored lore.
+Keep that terminal open. Open [the studio](http://127.0.0.1:3000/panel). Expect
+**8 canon entries**, an empty pending queue, an overlay preview, and offline Twitch
+indicators. Click **Fire test CANONIZED** for the nine-second reveal; it changes no
+stored lore. `/health` should report `ok: true`, `canonCount: 8`,
+`storage.persistent: true`, and `voiceMode: plain-text` on the first run.
 
-`better-sqlite3` is native. If a prebuilt binary is unavailable, install Python 3 and
-your platform's C++ build tools (macOS: `xcode-select --install`), then retry `npm ci`.
+Stop with **Ctrl+C**. Run `npm start` again to restart; no reseeding or OAuth is
+needed each time. Do not start a second copy on the same port.
+
+`better-sqlite3` is native. If `npm ci` fails to install/build it, first confirm Node 24
+and rerun `npm ci --include=dev`. If a prebuilt binary is unavailable for your platform,
+install Python 3 and your OS C++ build tools: macOS `xcode-select --install`; Windows
+Visual Studio Build Tools with **Desktop development with C++**; Linux a C++ compiler
+and make/build toolchain. Then rerun installation. No system SQLite installation is needed.
+`--include=dev` ensures the TypeScript runtime and validation tools are present, even
+when a machine has `NODE_ENV=production` set.
+
+Optional checks:
 
 ```sh
-npm run build   # Typecheck
-npm test        # Persistence, commands, OAuth, EventSub handlers, moderation, persona
-npm run seed    # Idempotent: rerunning does not duplicate sample entries
+npm run build
+npm test
+npm run seed
 ```
 
-The application uses port **3000** by default. This project's live development instance
-uses **3001** to avoid a port conflict. Set `PORT=3001` in `.env` if needed, restart,
-and use 3001 in every URL, including the Twitch redirect. `EADDRINUSE` means another
-process already uses the selected port; stop the old Canon instance or choose a free port.
+The application uses port **3000** by default; this project's configured live instance
+uses **3001**. If the terminal reports `EADDRINUSE`, stop your earlier Canon process or
+edit `PORT=3002` in `.env`, then run `npm start`. Use that port in the panel, overlay,
+OBS settings, and Twitch redirect. For example:
+
+| Setting | Default | Example free-port override |
+|---|---|---|
+| `.env` | `PORT=3000` | `PORT=3002` |
+| Panel | `http://127.0.0.1:3000/panel` | `http://127.0.0.1:3002/panel` |
+| Overlay | `http://127.0.0.1:3000/overlay` | `http://127.0.0.1:3002/overlay` |
+| Twitch registered redirect | `http://localhost:3000/auth/twitch/callback` | `http://localhost:3002/auth/twitch/callback` |
 
 ## Offline judge rehearsal
 
@@ -56,37 +137,66 @@ local studio. The overlay reconnects and continues its ticker while offline.
 
 ## Connect Twitch
 
-### 1. Register the application
+### 1. Create accounts and register the application
 
-1. Enable two-factor authentication on the Twitch account registering the app.
-2. Open the [Developer Console](https://dev.twitch.tv/console/apps) → **Register Your
-   Application**. Choose a unique name, **Chat Bot** category, and **Confidential**
-   client type if prompted.
-3. Register this exact OAuth Redirect URL for the default port:
-   `http://localhost:3000/auth/twitch/callback`.
-   For port 3001, use `http://localhost:3001/auth/twitch/callback` instead.
-   `localhost` and `127.0.0.1` are not interchangeable in the registered redirect.
-4. Under **Manage**, copy the client ID and generate a client secret. Put them in
-   **`.env`**, not `.env.example`. Never share your secret or token files.
-5. Choose your broadcaster login and bot login. A separate bot account is recommended;
-   the broadcaster account can also serve as the bot, including for manual command tests.
+Local judging needs none of these values. For a **real Twitch test**, use your own
+channel and app; do not ask for or copy the developer's private credentials.
+
+1. Sign in to your broadcaster account. Your channel login is the final segment of
+   `https://www.twitch.tv/YOUR_LOGIN` (not its display name with spaces).
+2. A separate bot is recommended: create a second ordinary Twitch account using
+   **Sign Up** at twitch.tv, verify its email, and note its login. For a quicker test,
+   you can use your broadcaster account as the bot; set both login variables to it.
+3. Enable 2FA for the account registering the application: Twitch **Settings →
+   Security and Privacy → Two-Factor Authentication**. Verify its email if Twitch asks.
+4. Open the [Developer Console](https://dev.twitch.tv/console/apps), sign in, then
+   **Applications → Register Your Application**. Choose a unique app name, category
+   **Chat Bot**, and client type **Confidential** if prompted. The app name is a label,
+   not your bot account's username.
+5. Add the exact **OAuth Redirect URL** `http://localhost:3000/auth/twitch/callback`.
+   If PORT differs, substitute it here. Save the URL (click **Add** where shown), then
+   create/save the app. Do not use `/panel`, HTTPS, a trailing slash, or `127.0.0.1`
+   for this registered callback. It must match Canon's generated redirect exactly.
+6. Open the app's **Manage** page. Copy **Client ID**. Click **New Secret** / generate
+   secret, then copy **Client Secret** into `.env`. Generating another secret invalidates
+   the old one, so update `.env` and restart if you regenerate it.
+7. In `.env`, set these six values, replacing the example labels with your own values:
 
 ```dotenv
 PORT=3000
 TWITCH_ENABLED=true
-TWITCH_CLIENT_ID=your_client_id
-TWITCH_CLIENT_SECRET=your_client_secret
+TWITCH_CLIENT_ID=your_application_client_id
+TWITCH_CLIENT_SECRET=your_application_client_secret
 TWITCH_CHANNEL=your_streamer_login
 TWITCH_BOT_USERNAME=your_bot_login
 ```
 
-Use login names without `@` or URLs. `TWITCH_BROADCASTER_ID` is optional: the app resolves
-the numeric ID from the broadcaster token and checks an explicitly supplied ID.
-Leave `TWITCH_OAUTH_REDIRECT_URI` blank unless explicitly setting the same local callback.
+### Where every environment value comes from
+
+| Key | Required for | Source / what to enter |
+|---|---|---|
+| `PORT` | All modes | Pick a free local port; default `3000`. Match all URLs to it. |
+| `DATABASE_PATH` | All modes | Keep `./data/canon.sqlite`; Canon creates it and its directory. No database credentials. |
+| `SEED_ON_START` | Demo | Keep `true` for eight sample entries. `false` skips samples in a fresh database. |
+| `TWITCH_ENABLED` | Live Twitch | Change `false` to `true` after app/account setup; restart. |
+| `TWITCH_CLIENT_ID` | Live Twitch | Your registered Twitch app's Manage page → Client ID. |
+| `TWITCH_CLIENT_SECRET` | Live Twitch | Same page → New Secret. Private; save only in `.env`. |
+| `TWITCH_CHANNEL` | Live Twitch | Broadcaster login from their channel URL, without `@` or URL prefix. |
+| `TWITCH_BOT_USERNAME` | Live chat | Login of the Twitch account that will send bot replies. May equal the channel login. |
+| `TWITCH_BROADCASTER_ID` | Optional | **Leave blank.** Canon obtains it from broadcaster OAuth; no ID lookup website needed. |
+| `TWITCH_REWARD_TITLE` | Live rewards | Keep `Canonize this`, exactly matching the reward you create below. No reward ID required. |
+| `TWITCH_OAUTH_REDIRECT_URI` | Optional | **Leave blank.** Canon derives `http://localhost:PORT/auth/twitch/callback`. If set, use that exact URL. |
+| `VOICE_PATH` | Persona editor | Keep `./voice.md`; that file is included. No AI key required. |
+
+**There is no bot-token field to fill.** Canon obtains access and refresh tokens in the
+browser OAuth flow below, saves them in ignored local files, and refreshes them. Do not
+use an unrelated token-generator site or paste tokens into the console, README, or chat.
+OAuth scopes are requested by Canon's buttons; you do not enter them in app registration.
+`OPENAI_API_KEY` is not needed: this release intentionally uses plain-text replies.
 
 ### 2. Create “Canonize this”
 
-1. In Creator Dashboard, open **Viewer Rewards → Power-ups & Channel Points**.
+1. On the broadcaster account, open **Creator Dashboard** from the avatar menu, then **Viewer Rewards → Power-ups & Channel Points**.
 2. Choose **Manage Rewards & Challenges → Add New Custom Reward**.
 3. Set the title to **Canonize this**, exactly, and cost to **100** for the demo.
 4. Description: `Make channel history! Enter term: definition, or type latest to canonize the newest proposal.`
@@ -101,7 +211,16 @@ Leave `TWITCH_OAUTH_REDIRECT_URI` blank unless explicitly setting the same local
 
 ### 3. Authorize both roles
 
-Restart with `npm start`, open `/panel`, and expand **Twitch connections & reward setup**.
+After editing `.env`, stop the old server with Ctrl+C, run **`npm start`**, open
+`http://127.0.0.1:3000/panel` (your chosen port), and expand
+**Twitch connections & reward setup**. Complete OAuth in your regular browser, not OBS.
+
+First choose **Authorize bot account**, sign in as `TWITCH_BOT_USERNAME`, approve chat
+access, and wait for Chat connected. Then choose **Authorize broadcaster**, sign in as
+`TWITCH_CHANNEL`, approve event access, and wait for Events ready. If both roles share
+one account, complete both flows anyway. If Twitch is signed in as the wrong account,
+sign out/switch accounts or use a separate browser profile before authorizing. Keep
+each OAuth attempt in one browser/profile so its state cookie returns to Canon.
 
 | Role | Button | Sign in as | Requested scopes |
 |---|---|---|---|
@@ -161,13 +280,58 @@ Canon does not automatically fulfill, cancel, or refund reward requests.
 Subscriptions produce a welcome ticker message. Incoming raids produce a welcome
 burst containing a random piece of channel lore. Neither creates a canonical entry.
 
-## OBS and streamer controls
+## OBS: add both routes
 
-Add an OBS **Browser Source**:
+Start Canon first and keep it running. OBS must run on the same computer. Neither
+source needs a separate server command, a local HTML file, or your Twitch stream key.
+Authenticate Twitch in your regular browser; OBS reads the already-connected server.
 
-- URL: `http://127.0.0.1:3000/overlay` (use 3001 if configured)
-- Width: **1920**, height: **1080**
-- Background: transparent; no custom CSS or remote assets required
+### `/overlay`: live transparent Browser Source
+
+1. Open OBS Studio, select your scene, then **Sources → + → Browser**.
+2. Create a source named **Canon Overlay**. Leave **Local file** unchecked.
+3. Set URL to `http://127.0.0.1:3000/overlay` (replace the port if changed).
+4. Set width **1920**, height **1080**, and FPS **30** if the field is shown. The app
+   supplies transparency; the default transparent Browser Source CSS is suitable.
+5. Leave **Shutdown source when not visible** and **Refresh browser when scene becomes
+   active** unchecked for the rehearsal, so it stays connected between scene changes.
+6. Click OK. Put Canon Overlay above your game/video source in the Sources list.
+   On a 1920×1080 scene, use **Transform → Fit to Screen** if necessary. A smaller
+   scene can fit the source proportionally.
+7. Open `/panel` in your browser and click **Fire test CANONIZED**. Expect a TEST-labeled
+   reveal for nine seconds and a lore ticker near the bottom. An otherwise empty,
+   transparent canvas between alerts is expected. Do not use `/overlay?preview` for
+   the live transparent source; its dark background is only for rehearsal.
+
+### `/panel`: Browser Source for a demo/control scene
+
+1. Create a separate OBS scene named **Canon Studio Demo** if you want to show the
+   control panel in the recording.
+2. Add **Sources → + → Browser**, name it **Canon Panel**, leave Local file unchecked,
+   and enter `http://127.0.0.1:3000/panel` (your configured port).
+3. Set width **1440**, height **1080**, then Fit to Screen as appropriate. The panel
+   is an opaque page intended to fill a demo scene, rather than layer over gameplay.
+4. For this panel source, replace Custom CSS with the following so OBS does not
+   override the panel background or disable scrolling:
+
+   ```css
+   body { margin: 0; background: #11151b; overflow: auto; }
+   ```
+
+5. Click OK. Right-click the **Canon Panel** source → **Interact** to click buttons,
+   enter commands, edit the persona, and scroll. Clicking the OBS preview alone does
+   not interact with the webpage. Use the normal browser for OAuth logins.
+6. Confirm the same canon count and queue as your browser panel. Approve a local test
+   proposal; the panel preview and connected Canon Overlay source should both react.
+   Keep this scene out of your live broadcast unless you intend to show moderation controls.
+
+For streamer controls that stay off the scene, optionally use **Docks → Custom Browser
+Docks** (older layouts: View → Docks), name **Canon**, and the `/panel` URL. A dock is
+operator UI, not a video source. If that menu is unavailable in your OBS/platform build,
+keep the panel in your normal browser; Browser Source support is what the demo requires.
+
+OBS property and platform details: [official Browser Source guide](https://obsproject.com/kb/browser-source)
+and [obs-browser platform support](https://github.com/obsproject/obs-browser).
 
 `/overlay?preview` adds a dark rehearsal background. The canvas scales proportionally
 in the panel and browser, keeping the preview aligned with the OBS composition.
@@ -185,6 +349,27 @@ It indicates unsaved changes and prevents stale saves from overwriting newer edi
 **Reload saved version** replaces the editor's text; copy unsaved work first if needed.
 **AI voice rewriting was deliberately skipped.** Persona editing is available for future
 use, but it does not change replies in this release. No OpenAI key or API call is used.
+
+## First-run troubleshooting
+
+| Symptom | What to do |
+|---|---|
+| GitHub 404 / Repository not found | Accept the repo invitation using the invited account, authenticate Git, then clone. Owner must know your GitHub username to invite you. |
+| `git`, `node`, or `npm` not found | Install the prerequisite, reopen the terminal, and rerun the version checks. |
+| `tsx` not found | In the repo directory run `npm ci --include=dev`; do not omit dev dependencies. |
+| Can't find package.json | Run commands inside the cloned `canon` directory. |
+| Panel URL doesn't open | Keep `npm start` running; read its printed port. If EADDRINUSE, choose another PORT in `.env` and restart. |
+| Twitch stays in local mode | Edit `.env`, set TWITCH_ENABLED=true, fill the required values, and restart. Make sure it isn't `.env.txt`. |
+| OAuth `redirect_mismatch` | In your Twitch app, add/save `http://localhost:YOUR_PORT/auth/twitch/callback` exactly. Start a new authorization from the panel; do not reuse the failed callback URL. |
+| OAuth expired/state error | Retry from the panel in one browser profile. Private windows don't share the state cookie with other windows. |
+| Wrong-account authorization | Sign in as the bot for bot OAuth and channel owner for broadcaster OAuth. Verify the two login values in `.env`. |
+| Channel Points missing/blank | Complete creator-tools onboarding; allow activation time. Use the local rehearsal or authenticated chat in the meantime. |
+| Reward shows only its title/prompt and the usual message box | Some Twitch layouts reuse that box for the selected reward. With the reward selected, type `latest` (no !canon) and submit. Confirm “Redeemed Canonize this” in chat and CANONIZED in the panel. |
+| Bot doesn't answer | Confirm Chat connected; use the configured channel's Chat tab and wait five seconds between commands. No live stream is needed for command tests. |
+| `latest` says no canon | `!canon latest` is a lookup. Use `latest` as reward text; first ensure a pending proposal exists. |
+| OBS source blank/frozen | Check the URL in your browser, the port, source visibility and dimensions. Refresh its cache in OBS if stale. Keep Canon running; the overlay reconnects. |
+| Panel controls don't click in OBS | Right-click source → Interact, or use a normal browser/dock. |
+| Temporary-memory warning | The configured DB is unavailable; the demo still works but is not durable. Use a writable DATABASE_PATH and restart before demonstrating persistence. |
 
 ## Persistence and reliability
 
