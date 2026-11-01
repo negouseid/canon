@@ -2,6 +2,7 @@ import type { Entry, Store } from './store.js';
 export type LiveEvent =
   | { type: 'canonized'; entry: Entry; test?: boolean }
   | { type: 'snapshot'; entries: Entry[] }
+  | { type: 'pending-changed' }
   | { type: 'community'; kind: 'raid' | 'subscription'; text: string };
 export type Publish = (event: LiveEvent) => void;
 
@@ -13,6 +14,7 @@ export function createEventHandlers(store: Store, rewardTitle: string, publish: 
       if (result.kind === 'canonized') {
         publish({ type: 'canonized', entry: result.entry });
         publish({ type: 'snapshot', entries: store.list() });
+        publish({ type: 'pending-changed' });
       }
       return result;
     },

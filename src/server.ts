@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { openStore } from './store.js';
 import { seed } from './seed.js';
 import { registerTwitch } from './twitch.js';
+import { registerPanel } from './panel.js';
 import type { Publish } from './events.js';
 const port = Number(process.env.PORT || 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 to 65535');
@@ -23,6 +24,7 @@ const publish: Publish = event => {
   for (const client of ws.clients) if (client.readyState === WebSocket.OPEN) client.send(message);
 };
 const twitch = registerTwitch(app, store, port, publish);
+registerPanel(app, store, publish);
 app.server.on('upgrade', (request, socket, head) => {
   const origin = request.headers.origin;
   const host = request.headers.host;
@@ -35,13 +37,15 @@ ws.on('connection', client => {
   client.on('error', error => app.log.warn(error));
   client.send(JSON.stringify({ type: 'snapshot', entries: store.list() }));
 });
-app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 4, twitchConnected: twitch.status.connected, eventsubReady: twitch.eventsub.ready }));
+app.get('/health', async () => ({ ok: true, canonCount: store.list().length, stage: 5, twitchConnected: twitch.status.connected, eventsubReady: twitch.eventsub.ready }));
 app.get('/api/canon', async () => store.list());
 app.get('/', async (_, reply) => reply.redirect('/panel'));
 for (const page of ['overlay', 'panel']) {
   const html = readFileSync(new URL(`../public/${page}.html`, import.meta.url), 'utf8');
   app.get('/' + page, async (_, reply) => reply.type('text/html').send(html));
 }
+const panelScript = readFileSync(new URL('../public/panel.js', import.meta.url), 'utf8');
+app.get('/panel.js', async (_, reply) => reply.type('application/javascript').send(panelScript));
 app.post('/api/test-canonized', { config: {}, bodyLimit: 1024 }, async (request, reply) => {
   // Browser JSON requests require a same-origin preflight; verify Origin when present too.
   if (!request.headers['content-type']?.startsWith('application/json')) return reply.code(415).send({ error: 'Use application/json' });

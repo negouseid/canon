@@ -25,13 +25,13 @@ test('real redemption handler promotes latest, broadcasts once, and deduplicates
       assert.equal(result.entry.author, 'original-author');
       assert.equal(result.entry.sourceEvent, 'chat:2');
     }
-    assert.deepEqual(emitted.map(item => item.type), ['canonized', 'snapshot']);
+    assert.deepEqual(emitted.map(item => item.type), ['canonized', 'snapshot', 'pending-changed']);
     store.close(); store = openStore(path);
     handler = createEventHandlers(store, 'Canonize this', message => emitted.push(message));
     assert.equal(handler.redemption(event)?.kind, 'duplicate');
     assert.equal(store.list().length, 1);
     assert.equal(store.list('pending').length, 1);
-    assert.equal(emitted.length, 2);
+    assert.equal(emitted.length, 3);
     assert.equal(store.query('Moon cheese')?.definition, 'The moon sponsors snacks.');
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
@@ -52,7 +52,7 @@ test('attached text creates canon; invalid or empty-queue redemptions cannot lat
     assert.equal(handler.redemption({ ...event, id: 'empty-queue', input: 'latest' })?.kind, 'duplicate');
     assert.equal(store.list('pending').length, 1);
     assert.equal(store.list().length, 1);
-    assert.equal(events.length, 2);
+    assert.equal(events.length, 3);
     assert.equal(handler.redemption({ ...event, id: 'new-redemption', input: '' })?.kind, 'canonized');
   } finally { store.close(); }
 });

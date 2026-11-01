@@ -6,7 +6,7 @@ export function isCanonCommand(text: string): boolean {
 }
 
 /** Return a response only for recognized commands. Proposals never become canon here. */
-export function handleCommand(store: Store, text: string, author: string, messageId: string): string | undefined {
+export function handleCommand(store: Store, text: string, author: string, messageId: string, onProposal?: () => void): string | undefined {
   const input = text.trim();
   if (/^!lore$/i.test(input)) {
     const entry = store.random();
@@ -25,6 +25,7 @@ export function handleCommand(store: Store, text: string, author: string, messag
     if (term.length > 100 || definition.length > 1000) return 'Keep the term under 101 characters and its definition under 1001.';
     if (!messageId) return 'Could not identify that message. Please try again.';
     const entry = store.add({ term, definition, author, sourceEvent: `chat:${messageId}` });
+    if (entry) onProposal?.();
     return entry ? `Proposed “${entry.term}” (#${entry.id}). Waiting for canonization.` : undefined;
   }
   if (argument.length > 100) return 'Canon terms can contain up to 100 characters.';

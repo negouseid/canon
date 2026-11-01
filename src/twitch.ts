@@ -116,7 +116,7 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
       if (recent.size >= 2000) for (const [key, at] of recent) if (now - at >= 5000) recent.delete(key);
       recent.set(userId, now); lastReply = now;
       try {
-        const reply = handleCommand(store, text, user, message.id);
+        const reply = handleCommand(store, text, user, message.id, () => publish({ type: 'pending-changed' }));
         if (reply) {
           // Log the same bounded response sent to chat; never log raw tokens or OAuth URLs.
           app.log.info({ reply: chatText(reply) }, 'Canon chat reply');

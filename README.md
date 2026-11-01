@@ -2,11 +2,11 @@
 
 Your channel remembers. A persistent Twitch lore keeper built for Codex x TwitchCon.
 
-## Current build: step 4 of 7
+## Current build: step 5 of 7
 
 Working: TypeScript server, SQLite canon/pending storage, eight fictional sample entries,
 transparent overlay, rotating ticker, reconnecting WebSocket, and local demo studio.
-Authenticated Twitch chat and bot OAuth are implemented. Live connection requires your app credentials and bot authorization. EventSub WebSocket integration is implemented; broadcaster authorization and a real redemption verify the live flow. Voice rewriting is next; panel moderation arrives in step 5.
+Authenticated Twitch chat and bot OAuth are implemented. Live connection requires your app credentials and bot authorization. EventSub WebSocket integration is implemented; broadcaster authorization and a real redemption verify the live flow. Panel moderation, canon search, and persona editing are implemented. Optional voice rewriting is next.
 
 ## Try the overlay
 
@@ -34,7 +34,7 @@ npm start
 
 Open http://127.0.0.1:3000 for the demo studio.
 http://127.0.0.1:3000/api/canon returns eight sample entries.
-http://127.0.0.1:3000/health reports `ok: true`, `canonCount: 8`, and `stage: 4`.
+http://127.0.0.1:3000/health reports `ok: true`, `canonCount: 8`, and `stage: 5`.
 No Twitch or OpenAI credentials are required for this step.
 
 ```sh
@@ -96,12 +96,11 @@ Official references:
 2. Transparent 1920×1080 `/overlay`, WebSocket updates, local test reveal (complete).
 3. Authenticated chat: `!canon term`, `!canon add term: definition`, `!lore` (implemented; authorize your bot to verify live).
 4. EventSub WebSocket: Canonize this reward, subscriptions, incoming raids (implemented; authorize broadcaster to verify live).
-5. Local `/panel`: approve/reject, browse canon, edit `voice.md`.
+5. Local `/panel`: approve/reject, browse/search canon, edit `voice.md` (complete).
 6. Optional OpenAI rewriting with timeout and plain-text fallback.
 7. Animation polish, complete clean-clone instructions, Devpost text, <3-minute shot list.
 
-The server binds to 127.0.0.1 and only accepts localhost/127.0.0.1 Host headers for local OBS use. HOST is reserved and does not override this. Panel authentication must be
-implemented before any remote exposure. The eventual OBS Browser Source will be
+The server binds to 127.0.0.1 and only accepts localhost/127.0.0.1 Host headers for local OBS use. HOST is reserved and does not override this. The panel uses per-process mutation tokens and same-origin checks; it is intended only for local use. User authentication must be implemented before any remote exposure. The eventual OBS Browser Source will be
 `http://127.0.0.1:3000/overlay`, width 1920, height 1080, transparent background.
 
 The final demo will open on a live CANONIZED reveal, show the actual redemption,
@@ -146,7 +145,7 @@ account and register your confidential Twitch application as described above.
    Expect a stored definition, a pending proposal acknowledgement, and random lore.
    `!canon Moon cheese` must report no canon until the proposal is approved. Proposals
    persist across restarts and remain hidden from canonical query/list responses.
-   Panel moderation and pending browsing arrive in step 5.
+   Pending browsing and moderation are available in `/panel`.
 
 Replies appear in both the server console and Twitch chat, prefixed `Canon:` and
 limited to 450 characters. Commands have a five-second per-user cooldown and a
@@ -223,3 +222,44 @@ revoked authorization leaves the overlay/chat available and prompts reauthorizat
 Channel Points creation requires creator tools to be enabled; after onboarding Twitch
 says activation may take up to 24 hours. See the
 [Channel Points FAQ](https://help.twitch.tv/s/article/channel-points-faq?language=en_US).
+
+## Streamer control panel (step 5)
+
+Open `http://127.0.0.1:3001/panel` (or your configured port).
+
+- **Pending queue:** proposals arrive live from `!canon add term: definition`.
+  **Approve & reveal** makes the entry queryable in chat and triggers CANONIZED on
+  connected overlays. **Reject** moves it out of the queue without a reveal or chat
+  availability. Rejected proposals remain in SQLite rather than being deleted.
+- **Canon library:** search across terms, definitions, and authors. New approvals and
+  reward canonizations join the library automatically; the lore ticker updates too.
+- **Streamer voice:** edit and save the persona in `VOICE_PATH` (default `voice.md`).
+  The editor supports up to 8000 characters, indicates unsaved changes, and guards
+  against overwriting a version changed elsewhere. On a conflict, copy your edits if
+  needed, then choose **Reload saved version** before editing again. This button
+  replaces the editor contents. Voice rewriting is implemented in the next step;
+  saving the persona alone does not change the current plain-text chat responses.
+- **Connections:** expandable Twitch status and authorization links, with compact
+  chat/EventSub status indicators always visible at the top.
+
+To verify moderation with your own channel, send:
+
+```text
+!canon add The Checkpoint Treaty: Every checkpoint is a snack break.
+```
+
+Watch it appear in Pending, click **Approve & reveal**, then query
+`!canon The Checkpoint Treaty` from Twitch chat. Add a different proposal and reject
+it; querying that term must still return no canon. Save a small persona edit, reload
+its saved version, and confirm the text persists. No server restart is needed for
+moderation or saving the persona.
+
+The panel synchronizes through WebSocket events with a 15-second polling fallback.
+Double approvals or a race with a Channel Points redemption return a conflict and
+refresh the queue. Mutation routes require a panel-issued token, JSON, and same-origin
+browser requests. Content is rendered as text, including viewer-supplied lore.
+The service remains bound to loopback and is not an authenticated remote admin panel.
+
+Validation includes API-level moderation, duplicate approval, origin/token rejection,
+voice persistence and stale-save conflict tests. Browser QA uses an isolated database
+and separate persona file so it does not alter your real channel canon or persona.
