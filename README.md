@@ -10,6 +10,8 @@ entry, and the streamer keeps control through a local moderation panel.
 Requires **Node.js 22.12+** and npm; tested locally with Node 24.
 
 ```sh
+git clone https://github.com/negouseid/canon.git
+cd canon
 npm ci
 cp .env.example .env
 npm start

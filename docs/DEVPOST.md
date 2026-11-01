@@ -96,7 +96,7 @@ TypeScript, Node.js, Fastify, Twurple, Twitch OAuth, Twitch Chat, EventSub WebSo
 better-sqlite3, SQLite, WebSocket, HTML, CSS, JavaScript, OBS Browser Source, and Codex.
 
 ## Submission fields to fill manually
-- Public repository URL
+- Repository: https://github.com/negouseid/canon (currently private; grant judge access or make public before submission if required)
 - Recorded demo video URL
 - Team/author details and any required event acknowledgments
 
