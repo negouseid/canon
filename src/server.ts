@@ -7,6 +7,7 @@ import { registerTwitch } from './twitch.js';
 import { registerPanel } from './panel.js';
 import { createIdleLore, idleLoreSeconds } from './idle-lore.js';
 import type { LiveEvent } from './events.js';
+import { createCanonCounts } from './canon-counts.js';
 const requestedPort = Number(process.env.PORT || 3000);
 if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) { console.error('PORT is invalid; using 3000.'); }
 const port = Number.isInteger(requestedPort) && requestedPort >= 1 && requestedPort <= 65535 ? requestedPort : 3000;
@@ -19,12 +20,13 @@ app.addHook('onRequest', async (request, reply) => {
   if (!allowedHosts.has(request.headers.host || '')) return reply.code(403).send({ error: 'Local access only' });
   reply.header('Referrer-Policy', 'no-referrer');
 });
-const hub = createLiveHub(app.server, store, port, app.log);
+const counts = createCanonCounts(store);
+const hub = createLiveHub(app.server, store, port, app.log, counts);
 const idle = createIdleLore(store, hub.publish, idleLoreSeconds(process.env.IDLE_LORE_SECONDS));
 const publish = (event: LiveEvent) => { idle.observe(event); return hub.publish(event); };
 app.addHook('onClose', async () => { idle.stop(); });
-const twitch = registerTwitch(app, store, port, publish, idle.activity);
-registerPanel(app, store, publish, undefined, runtime.status, idle.activity);
+const twitch = registerTwitch(app, store, port, publish, idle.activity, counts);
+registerPanel(app, store, publish, undefined, runtime.status, idle.activity, counts);
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof StorageUnavailable) return reply.code(503).send({ error: error.message });
   return reply.send(error);

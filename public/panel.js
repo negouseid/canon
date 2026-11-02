@@ -28,6 +28,7 @@ function renderPending() {
   });
   $('pendingList').replaceChildren(...(nodes.length ? nodes : [empty('The next chapter is unwritten.', 'New !canon add proposals appear here automatically.')]));
 }
+function renderCounts(value) { const counts = CanonLive.counts(value); if (counts) $('canonTotals').textContent = counts.total + ' total canon · ' + counts.session + ' canonized this session'; }
 function renderCanon() {
   $('canonCount').textContent = state.canon.length; $('rejectedCount').textContent = state.rejectedCount;
   const query = $('search').value.trim().toLocaleLowerCase();
@@ -39,7 +40,7 @@ function renderCanon() {
 async function refreshPanel() {
   if (refreshing) { refreshAgain = true; return; }
   refreshing = true;
-  try { const previous = state; const incoming = await api('/api/panel'); if (!incoming || !Array.isArray(incoming.pending) || !Array.isArray(incoming.canon)) throw Error('Invalid panel snapshot. Retrying.'); state = incoming; if (syncError) { message('panelMessage', 'Connection restored.'); syncError = false; } $('storageMessage').textContent = state.storage?.warning || ''; if (!initialized || JSON.stringify(previous.pending) !== JSON.stringify(state.pending)) renderPending(); if (!initialized || JSON.stringify(previous.canon) !== JSON.stringify(state.canon)) renderCanon(); $('rejectedCount').textContent = state.rejectedCount; initialized = true; $('syncStatus').textContent = 'Memory synced · ' + new Date().toLocaleTimeString(); }
+  try { const previous = state; const incoming = await api('/api/panel'); if (!incoming || !Array.isArray(incoming.pending) || !Array.isArray(incoming.canon)) throw Error('Invalid panel snapshot. Retrying.'); state = incoming; renderCounts(state.counts); if (syncError) { message('panelMessage', 'Connection restored.'); syncError = false; } $('storageMessage').textContent = state.storage?.warning || ''; if (!initialized || JSON.stringify(previous.pending) !== JSON.stringify(state.pending)) renderPending(); if (!initialized || JSON.stringify(previous.canon) !== JSON.stringify(state.canon)) renderCanon(); $('rejectedCount').textContent = state.rejectedCount; initialized = true; $('syncStatus').textContent = 'Memory synced · ' + new Date().toLocaleTimeString(); }
   catch (error) { syncError = true; message('panelMessage', error.message, true); }
   finally { refreshing = false; if (refreshAgain) { refreshAgain = false; void refreshPanel(); } }
 }
@@ -98,7 +99,7 @@ function connect() {
   let lastMessage = Date.now();
   const watchdog = setInterval(() => { if (Date.now() - lastMessage > 35_000) socket.close(); }, 5000);
   socket.onopen = () => { retry = 1000; lastMessage = Date.now(); $('overlayStatus').textContent = 'Live connection'; void refreshPanel(); };
-  socket.onmessage = ({ data }) => { const event = CanonLive.parse(data); if (!event) return; lastMessage = Date.now(); if (event.type === 'pending-changed' || event.type === 'snapshot') void refreshPanel(); };
+  socket.onmessage = ({ data }) => { const event = CanonLive.parse(data); if (!event) return; lastMessage = Date.now(); if (event.type === 'snapshot') renderCounts(event.counts); if (event.type === 'pending-changed' || event.type === 'snapshot') void refreshPanel(); };
   socket.onclose = () => { clearInterval(watchdog); $('overlayStatus').textContent = 'Reconnecting'; setTimeout(connect, retry); retry = Math.min(retry * 2, 15000); };
   socket.onerror = () => socket.close();
 }

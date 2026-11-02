@@ -3,11 +3,12 @@ import { RefreshingAuthProvider, getTokenInfo, type AccessToken } from '@twurple
 import { mkdirSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import type { Store } from './store.js';
+import { createCanonCounts } from './canon-counts.js';
 import { createEventHandlers, type Publish } from './events.js';
 import { startEventSession, eventTypes } from './eventsub-session.js';
 import { ConfigurationError, deadline, permanentFailure, readToken, retryTask, validateToken } from './reliability.js';
 
-export function registerEventSub(app: FastifyInstance, store: Store, publish: Publish) {
+export function registerEventSub(app: FastifyInstance, store: Store, publish: Publish, counts = createCanonCounts(store)) {
   const clientId = process.env.TWITCH_CLIENT_ID || '', clientSecret = process.env.TWITCH_CLIENT_SECRET || '';
   const channel = (process.env.TWITCH_CHANNEL || '').trim().toLowerCase();
   const rewardTitle = process.env.TWITCH_REWARD_TITLE || 'Canonize this';
@@ -19,7 +20,7 @@ export function registerEventSub(app: FastifyInstance, store: Store, publish: Pu
     message: enabled ? 'Authorize the broadcaster to receive reward, subscription, and raid events.' : 'Local mode. Enable Twitch to connect EventSub.'
   };
   const auth = new RefreshingAuthProvider({ clientId, clientSecret });
-  const handlers = createEventHandlers(store, rewardTitle, publish);
+  const handlers = createEventHandlers(store, rewardTitle, publish, counts);
   let listener: ReturnType<typeof startEventSession> | undefined;
   let userId: string | undefined;
   let closing = false;

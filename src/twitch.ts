@@ -4,13 +4,14 @@ import type { FastifyInstance } from 'fastify';
 import { mkdirSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Store } from './store.js';
+import { createCanonCounts } from './canon-counts.js';
 import { handleCommand, chatText, isCanonCommand } from './commands.js';
 import { createOAuthStates } from './oauth-state.js';
 import { registerEventSub } from './eventsub.js';
 import type { Publish } from './events.js';
 import { ConfigurationError, deadline, permanentFailure, readToken, retryTask, validateToken } from './reliability.js';
 
-export function registerTwitch(app: FastifyInstance, store: Store, port: number, publish: Publish, onActivity: () => void = () => {}) {
+export function registerTwitch(app: FastifyInstance, store: Store, port: number, publish: Publish, onActivity: () => void = () => {}, counts = createCanonCounts(store)) {
   const enabled = process.env.TWITCH_ENABLED === 'true';
   const clientId = process.env.TWITCH_CLIENT_ID || '';
   const clientSecret = process.env.TWITCH_CLIENT_SECRET || '';
@@ -21,7 +22,7 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
   const tokenPath = resolve('data/twitch-bot-token.json');
   const states = createOAuthStates();
   const broadcasterStates = createOAuthStates();
-  const eventsub = registerEventSub(app, store, publish);
+  const eventsub = registerEventSub(app, store, publish, counts);
   const configured = Boolean(clientId && clientSecret && /^[a-z0-9_]{1,25}$/.test(channel) && /^[a-z0-9_]{1,25}$/.test(expectedBot));
   const status = { enabled, configured, connected: false, authenticated: false, bot: '', channel,
     message: !enabled ? 'Local mode. Set TWITCH_ENABLED=true to connect chat.' : !configured ? 'Set client ID, client secret, channel, and TWITCH_BOT_USERNAME in .env, then restart.' : 'Authorize your bot account to connect chat.',

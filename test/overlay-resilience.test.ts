@@ -28,7 +28,12 @@ test('actual overlay script ignores malformed messages, keeps ticker running off
   const first = sockets[0]; first.onopen();
   for (const data of ['not json', 'null', '{"type":"snapshot","entries":null}', '{"type":"canonized","entry":null}']) assert.doesNotThrow(() => first.onmessage({ data }));
   const entry = { term: 'Safe lore', definition: 'The overlay keeps going.', author: 'viewer' };
-  first.onmessage({ data: JSON.stringify({ type: 'snapshot', entries: [null, entry] }) });
+  first.onmessage({ data: JSON.stringify({ type: 'snapshot', entries: [null, entry], counts: { total: 1, session: 1 } }) });
+  assert.equal(node('canonTotal').textContent, 1); assert.equal(node('canonSession').textContent, 1);
+  for (const counts of [null, { total: -1, session: 2 }, { total: '2', session: 2 }, { total: 2, session: 0.5 }, { total: 2, session: Number.MAX_SAFE_INTEGER + 1 }]) {
+    assert.doesNotThrow(() => first.onmessage({ data: JSON.stringify({ type: 'snapshot', entries: [entry], counts }) }));
+    assert.equal(node('canonTotal').textContent, 1); assert.equal(node('canonSession').textContent, 1);
+  }
   first.onmessage({ data: JSON.stringify({ type: 'community', kind: 'lore', text: 'Remember this? Safe lore' }) });
   assert.equal(node('lore').textContent, 'Remember this? Safe lore');
   first.onmessage({ data: JSON.stringify({ type: 'canonized', entry }) });

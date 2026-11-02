@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { registerPanel } from '../src/panel.js';
 import { openStore } from '../src/store.js';
-import type { LiveEvent } from '../src/events.js';
+import { createEventHandlers, type LiveEvent } from '../src/events.js';
+import { createCanonCounts } from '../src/canon-counts.js';
 
 test('panel approves once, rejects safely, and requires same-origin mutation credentials', async () => {
   const store = openStore(':memory:');
@@ -78,5 +79,43 @@ test('starter pack seeds an empty store once, reports counts, publishes snapshot
     assert.equal(second.statusCode, 200); assert.deepEqual(second.json(), { added: 0, alreadyPresent: 8 });
     assert.equal(store.list().length, 8); assert.equal(events.length, 2);
     assert.ok(events.every(event => event.type === 'snapshot')); // No fake canonization burst.
+  } finally { await app.close(); store.close(); }
+});
+
+test('shared live counts track redemption and approval, exclude seeds/rejections/duplicates, and read lifetime from store', async () => {
+  const store = openStore(':memory:'); const app = Fastify(); const events: LiveEvent[] = [];
+  const counts = createCanonCounts(store); const publish = (event: LiveEvent) => { events.push(event); };
+  registerPanel(app, store, publish, undefined, undefined, () => {}, counts);
+  const handlers = createEventHandlers(store, 'Canonize this', publish, counts);
+  try {
+    const initial = (await app.inject({ method: 'GET', url: '/api/panel' })).json();
+    assert.deepEqual(initial.counts, { total: 0, session: 0 });
+    const headers = { 'x-canon-csrf': initial.csrf };
+    await app.inject({ method: 'POST', url: '/api/panel/seed-starter', headers, payload: {} });
+    assert.deepEqual(counts.read(), { total: 8, session: 0 });
+    const redemption = { id: 'count:redemption', rewardTitle: 'Canonize this', input: 'Moon cheese: Our snack sponsor.', userName: 'viewer', status: 'unfulfilled' };
+    assert.equal(handlers.redemption(redemption)?.kind, 'canonized');
+    assert.deepEqual(counts.read(), { total: 9, session: 1 });
+    const redemptionPush = events.slice(-3);
+    assert.equal(redemptionPush[0].type, 'canonized');
+    assert.equal(redemptionPush[1].type, 'snapshot');
+    if (redemptionPush[1].type === 'snapshot') assert.deepEqual(redemptionPush[1].counts, { total: 9, session: 1 });
+    assert.equal(handlers.redemption(redemption)?.kind, 'duplicate');
+    assert.deepEqual(counts.read(), { total: 9, session: 1 });
+    const pending = store.add({ term: 'Door boss', definition: 'Push.', author: 'viewer', sourceEvent: 'count:proposal' })!;
+    assert.deepEqual(counts.read(), { total: 9, session: 1 });
+    const url = '/api/panel/proposals/' + pending.id + '/review';
+    assert.equal((await app.inject({ method: 'POST', url, headers, payload: { action: 'approve' } })).statusCode, 200);
+    assert.deepEqual(counts.read(), { total: 10, session: 2 });
+    assert.equal((await app.inject({ method: 'POST', url, headers, payload: { action: 'approve' } })).statusCode, 409);
+    const rejected = store.add({ term: 'Not canon', definition: 'Rejected.', author: 'viewer', sourceEvent: 'count:rejected' })!;
+    await app.inject({ method: 'POST', url: '/api/panel/proposals/' + rejected.id + '/review', headers, payload: { action: 'reject' } });
+    await app.inject({ method: 'POST', url: '/api/panel/seed-starter', headers, payload: {} });
+    const final = (await app.inject({ method: 'GET', url: '/api/panel' })).json();
+    assert.deepEqual(final.counts, { total: store.list().length, session: 2 });
+    const snapshot = events[events.length - 1];
+    assert.equal(snapshot.type, 'snapshot');
+    if (snapshot.type === 'snapshot') assert.deepEqual(snapshot.counts, final.counts);
+    assert.deepEqual(createCanonCounts(store).read(), { total: 10, session: 0 });
   } finally { await app.close(); store.close(); }
 });

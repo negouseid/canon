@@ -126,7 +126,7 @@ input. Restart and query it again to verify persistence. These are clearly label
 local commands, using the real handler; they do not send Twitch messages or spend points.
 
 See the [failure-path audit](docs/RELIABILITY.md) for before/after behavior and tests.
-The suite now has **23 tests**, including forced EventSub disconnection/re-subscription
+The suite now has **24 tests**, including forced EventSub disconnection/re-subscription
 and a complete offline child-process flow from `.env.example`. An intentional mock
 HTTP 503 log during the test is expected.
 
@@ -304,6 +304,27 @@ then expect **8 added / 0 already present**, a filled library and ticker. Click 
 expect **0 added / 8 already present** and still eight entries. With the five-second
 idle setting, a **Remember this?** ticker callback follows after a quiet gap.
 Never remove the main channel database just to make a recording start empty.
+
+## Live canon counts
+
+The overlay ticker and panel canon library show **total canon** and **canonized this
+session**, updated through the live snapshot stream alongside each reveal.
+Total canon is the current canonical store size (`store.list().length`), including
+starter samples. Session counts start at zero on every server restart and increase
+only when a Channel Points redemption canonizes an entry or a panel approval succeeds.
+Starter seeding increases the total only for newly inserted samples; it never increases
+the session count. Proposals, queries, rejections, duplicate redemptions, repeated
+approvals, auto-lore, and test reveals do not increase the session count.
+These are entry counts only, with no viewer tracking or retention measurement.
+Malformed count payloads are ignored without interrupting lore or reveals.
+
+For a local camera demo, open `/panel`, expand **Offline command rehearsal**, run
+`!canon add Counter demo: Chat wrote another chapter.`, then click **Approve & reveal**.
+Both numbers increase by one as the reveal appears. Use a fresh term for each take.
+For the Twitch version, propose a fresh term in chat and redeem **Canonize this** with
+`latest`: successful canonization also increases both numbers by one. Restarting the
+server preserves the total and resets the session count to zero. **Fire test CANONIZED**
+does not move either number.
 
 ## Auto-lore during idle gaps
 

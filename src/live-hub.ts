@@ -3,8 +3,9 @@ import type { Server } from 'node:http';
 import type { FastifyBaseLogger } from 'fastify';
 import type { Store } from './store.js';
 import type { LiveEvent } from './events.js';
+import { createCanonCounts } from './canon-counts.js';
 
-export function createLiveHub(server: Server, store: Store, port: number, log: Pick<FastifyBaseLogger, 'warn'>) {
+export function createLiveHub(server: Server, store: Store, port: number, log: Pick<FastifyBaseLogger, 'warn'>, counts = createCanonCounts(store)) {
   const ws = new WebSocketServer({ noServer: true, maxPayload: 1024 });
   function send(client: WebSocket, event: LiveEvent) {
     if (client.readyState !== WebSocket.OPEN) return false;
@@ -24,7 +25,7 @@ export function createLiveHub(server: Server, store: Store, port: number, log: P
   ws.on('connection', client => {
     alive.add(client); client.on('pong', () => alive.add(client));
     client.on('error', () => client.terminate());
-    try { send(client, { type: 'snapshot', entries: store.list() }); }
+    try { send(client, counts.snapshot()); }
     catch { client.close(1011, 'Storage unavailable; reconnecting'); }
   });
   const heartbeat = setInterval(() => {

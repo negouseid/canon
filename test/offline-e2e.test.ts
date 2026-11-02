@@ -15,6 +15,7 @@ test('fresh env-example offline flow: seed, malformed/no-match commands, propose
     const health = await (await fetch(fixture.base + '/health')).json();
     assert.equal(health.canonCount, 8); assert.equal(health.twitchConnected, false); assert.equal(health.voiceMode, 'plain-text'); assert.equal(health.storage.persistent, true);
     const data = await (await fetch(fixture.base + '/api/panel')).json();
+    assert.deepEqual(data.counts, { total: 8, session: 0 });
     const headers = { 'content-type': 'application/json', 'x-canon-csrf': data.csrf, origin: fixture.base };
     const command = async (text: string) => (await fetch(fixture.base + '/api/panel/rehearse', { method: 'POST', headers, body: JSON.stringify({ command: text }) })).json();
     assert.match((await command('!canon Unknown Thing')).reply, /No canon/);
@@ -34,9 +35,13 @@ test('fresh env-example offline flow: seed, malformed/no-match commands, propose
     const reviewed = await fetch(fixture.base + '/api/panel/proposals/' + pending[0].id + '/review', { method: 'POST', headers, body: '{"action":"approve"}' });
     assert.equal(reviewed.status, 200); assert.equal((await reveal).entry.term, 'Offline lore');
     assert.match((await command('!canon Offline lore')).reply, /Everything still works/);
+    assert.deepEqual((await (await fetch(fixture.base + '/api/panel')).json()).counts, { total: 9, session: 1 });
+    await fetch(fixture.base + '/api/test-canonized', { method: 'POST', headers, body: '{}' });
+    assert.deepEqual((await (await fetch(fixture.base + '/api/panel')).json()).counts, { total: 9, session: 1 });
     socket.close(); await fixture.stop();
     fixture = await startFixture(dir);
     assert.equal((await (await fetch(fixture.base + '/health')).json()).canonCount, 9);
+    assert.deepEqual((await (await fetch(fixture.base + '/api/panel')).json()).counts, { total: 9, session: 0 });
     const restarted = await (await fetch(fixture.base + '/api/canon')).json();
     assert.ok(restarted.some((entry: { term: string }) => entry.term === 'Offline lore'));
     assert.equal(fixture.output().includes('UnhandledPromiseRejection'), false);

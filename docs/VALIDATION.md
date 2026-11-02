@@ -1,5 +1,22 @@
 # Verification — November 1, 2026
 
+## Live canon counts
+
+- `npm run build && npm test` passed: **24 tests**, zero failures.
+- Shared in-memory session state connects EventSub redemption and panel approval;
+  lifetime totals come directly from canonical store entries. Snapshots carry both.
+- Tests exercise redemption, duplicate delivery, pending proposals, panel approval,
+  repeat approval, rejection, starter seeding/reseeding, and restart. Only successful
+  redemption/approval increments the session count; restart resets it while preserving lore.
+- Overlay resilience tests reject malformed, negative, fractional and unsafe count
+  values while preserving usable snapshots and the last valid display.
+- Browser verification on an isolated offline database: proposal kept 8/0;
+  approval immediately showed 9/1 in both panel and overlay with CANONIZED visible.
+  The quiet ticker labels remain separate from the reveal card at 1920×1080 scaling.
+  No count animation was added; existing reduced-motion behavior remains intact.
+- Counts measure canonical entries only; no analytics, rankings, or viewer tracking.
+
+
 ## Feature 2: starter lore pack — both features verified
 
 - Final `npm run build && npm test` passed: **23 tests**, zero failures. Every existing

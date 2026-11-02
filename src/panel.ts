@@ -6,8 +6,9 @@ import type { Store } from './store.js';
 import type { Publish } from './events.js';
 import { handleCommand, isCanonCommand } from './commands.js';
 import { seed } from './seed.js';
+import { createCanonCounts } from './canon-counts.js';
 
-export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md'), storage?: { mode: string; persistent: boolean; available: boolean; warning: string }, onActivity: () => void = () => {}) {
+export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md'), storage?: { mode: string; persistent: boolean; available: boolean; warning: string }, onActivity: () => void = () => {}, counts = createCanonCounts(store)) {
   const csrf = randomBytes(32).toString('hex');
   const revision = (text: string) => createHash('sha256').update(text).digest('hex');
   function readVoice() {
@@ -21,7 +22,7 @@ export function registerPanel(app: FastifyInstance, store: Store, publish: Publi
   }
   app.get('/api/panel', async (_, reply) => {
     reply.header('Cache-Control', 'no-store');
-    return { csrf, pending: store.list('pending'), canon: store.list(), rejectedCount: store.list('rejected').length, storage };
+    return { csrf, pending: store.list('pending'), canon: store.list(), rejectedCount: store.list('rejected').length, storage, counts: counts.read() };
   });
   app.post<{ Params: { id: string }; Body: { action: 'approve' | 'reject' } }>('/api/panel/proposals/:id/review', {
     preHandler: mutation, bodyLimit: 1024,
@@ -36,8 +37,9 @@ export function registerPanel(app: FastifyInstance, store: Store, publish: Publi
     const entry = store.review(id, approved ? 'canon' : 'rejected');
     if (!entry) return reply.code(409).send({ error: 'This proposal was already reviewed or canonized. The queue has been refreshed.' });
     if (approved) {
+      counts.recordCanonization();
       publish({ type: 'canonized', entry });
-      publish({ type: 'snapshot', entries: store.list() });
+      publish(counts.snapshot());
     }
     publish({ type: 'pending-changed' });
     return { entry };
@@ -56,7 +58,7 @@ export function registerPanel(app: FastifyInstance, store: Store, publish: Publi
     schema: { body: { type: 'object', additionalProperties: false, maxProperties: 0 } }
   }, async () => {
     const result = seed(store);
-    publish({ type: 'snapshot', entries: store.list() });
+    publish(counts.snapshot());
     return result;
   });
   app.get('/api/panel/voice', async (_, reply) => {
