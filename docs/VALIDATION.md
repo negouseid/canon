@@ -1,5 +1,27 @@
 # Verification — November 1, 2026
 
+## Live Twitch and native Chrome verification — November 2, 2026
+
+- Confirmed real UI capture, draft editing, save-as-proposal, panel approval, and
+  overlay reveal using a labeled local rehearsal message (The Snack Parliament).
+- With user authorization, posted a labeled demo message in `neverstreaminggoo`.
+  It appeared in Catch this moment as actual Twitch chat, without a LOCAL REHEARSAL
+  badge; Canon's own bot reply was excluded from the recent-chat list.
+- Sent `!canon add The Snack Charter: Every snack break needs approval from the Chair Council.`
+  in Twitch and observed Canon's real pending-proposal reply.
+- Redeemed the existing Canonize this Channel Points reward with `latest`.
+  EventSub canonized The Snack Charter; totals changed from 11/1 to 12/2.
+  A subsequent `!canon The Snack Charter` returned the saved definition in Twitch.
+- A second authorized reward take submitted The Buffering Baron directly as
+  `term: definition`; captured its actual EventSub-driven CANONIZED reveal and
+  the live 13 total / 3 this session counters. Neither reveal was a test event.
+- Saved actual Twitch/panel/overlay screenshots for the revised narrated demo.
+  The video uses cropped real screen captures and edited cuts, not a claim of one
+  continuous recording. Narration remains the user-supplied ElevenLabs audio.
+- This follow-up resolves the visual-verification limitation recorded below.
+  No application code changed after the 29-test passing capture implementation.
+
+
 ## Catch this moment: chat capture and viewer-aware idle
 
 - `npm run build && npm test` passed: **29 tests**, zero failures.
