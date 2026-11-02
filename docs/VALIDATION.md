@@ -1,5 +1,27 @@
 # Verification — November 1, 2026
 
+## Catch this moment: chat capture and viewer-aware idle
+
+- `npm run build && npm test` passed: **29 tests**, zero failures.
+- Recent chat is capped at 50 messages/10 minutes, deduplicated in memory, cleared on
+  close/restart, and never persisted as a transcript. The saved lore fields alone persist.
+- Fake-clock tests verify expiry, bounded memory, bot-reply exclusion, duplicate
+  suppression, coalesced notifications, timer cleanup, and ordinary chat resetting idle.
+- Panel integration tests verify CSRF/Origin/content-type checks, schemas, 1–5 real
+  source messages, invalid/expired sources, idempotent capture, pending-only save,
+  approval/reveal, and the existing canon counts.
+- A process test uses the actual server and WebSocket: chat pushes a generic
+  `chat-changed` signal without raw text; edited lore persists across restart while
+  recent chat vanishes and session counts reset. No new keys or scopes are needed.
+- The actual panel JavaScript runs in a controlled DOM test: source text is never
+  inserted as HTML; live refresh and failed saves preserve edits; changing sources
+  preserves the draft; selecting/drafting never saves or increments counts.
+- TypeScript build, JavaScript syntax, and diff whitespace checks pass.
+- Native browser control was unavailable (`native pipe path unavailable`), so this
+  pass does **not** claim visual browser verification or a fresh UI screenshot.
+- Automatic lore suggestions, lore-mention cards, and AI drafting remain future work.
+
+
 ## Live canon counts
 
 - `npm run build && npm test` passed: **24 tests**, zero failures.

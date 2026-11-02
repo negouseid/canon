@@ -4,6 +4,7 @@ export type LiveEvent =
   | { type: 'canonized'; entry: Entry; test?: boolean }
   | { type: 'snapshot'; entries: Entry[]; counts?: CanonCounts }
   | { type: 'pending-changed' }
+  | { type: 'chat-changed' }
   | { type: 'heartbeat' }
   | { type: 'community'; kind: 'raid' | 'subscription' | 'lore'; text: string };
 export type Publish = (event: LiveEvent) => void;

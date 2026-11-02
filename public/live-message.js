@@ -10,7 +10,7 @@ globalThis.CanonLive = {
       if (!event || typeof event !== 'object') return null;
       const entry = value => value && typeof value.term === 'string' && value.term.length <= 100 &&
         typeof value.definition === 'string' && value.definition.length <= 1000 && typeof value.author === 'string';
-      if (event.type === 'heartbeat' || event.type === 'pending-changed') return event;
+      if (event.type === 'heartbeat' || event.type === 'pending-changed' || event.type === 'chat-changed') return event;
       if (event.type === 'snapshot' && Array.isArray(event.entries)) {
         const clean = { ...event, entries: event.entries.filter(entry) };
         const counts = this.counts(event.counts);

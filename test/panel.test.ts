@@ -119,3 +119,52 @@ test('shared live counts track redemption and approval, exclude seeds/rejections
     assert.deepEqual(createCanonCounts(store).read(), { total: 10, session: 0 });
   } finally { await app.close(); store.close(); }
 });
+
+test('chat capture uses real recent sources, stays pending until approved, deduplicates retries, and enforces panel security', async () => {
+  const { createChatCapture } = await import('../src/chat-capture.js');
+  let now = 0, activity = 0;
+  const chat = createChatCapture(() => activity++, () => {}, { now: () => now, later: setTimeout, cancel: clearTimeout });
+  const store = openStore(':memory:'); const app = Fastify(); const events: LiveEvent[] = [];
+  const counts = createCanonCounts(store);
+  registerPanel(app, store, event => events.push(event), undefined, undefined, () => activity++, counts, chat);
+  try {
+    const csrf = (await app.inject({ method: 'GET', url: '/api/panel' })).json().csrf;
+    const headers = { 'x-canon-csrf': csrf, host: 'localhost:3001' };
+    const rehearsal = '/api/panel/chat/rehearse', capture = '/api/panel/chat/capture';
+    const sample = { author: 'Viewer_1', text: '<img src=x> The chair is in charge.' };
+    for (const url of [rehearsal, capture]) {
+      const payload = url === rehearsal ? sample : { messageIds: ['no'], term: 'Chair Council', definition: 'The chair rules.' };
+      for (const rejected of [{}, { 'x-canon-csrf': 'wrong' }, { ...headers, origin: 'https://example.com' }]) {
+        assert.equal((await app.inject({ method: 'POST', url, headers: rejected, payload })).statusCode, 403);
+      }
+      assert.equal((await app.inject({ method: 'POST', url, headers, payload: 'plain text' })).statusCode, 415);
+    }
+    assert.equal((await app.inject({ method: 'POST', url: rehearsal, headers, payload: sample })).statusCode, 200);
+    assert.equal(activity, 1);
+    const recent = await app.inject({ method: 'GET', url: '/api/panel/chat' });
+    assert.equal(recent.headers['cache-control'], 'no-store');
+    const messages = recent.json().messages; assert.equal(messages.length, 1); assert.equal(messages[0].local, true); assert.equal(messages[0].text, sample.text);
+    const payload = { messageIds: [messages[0].id], term: 'Chair Council', definition: 'The empty chair has final say.' };
+    for (const invalid of [{ ...payload, messageIds: [] }, { ...payload, messageIds: [messages[0].id, messages[0].id] },
+      { ...payload, messageIds: Array.from({ length: 6 }, (_, i) => String(i)) }, { ...payload, term: '   ' },
+      { ...payload, definition: 'bad\nline' }, { ...payload, definition: 'x'.repeat(1001) }]) {
+      assert.equal((await app.inject({ method: 'POST', url: capture, headers, payload: invalid })).statusCode, 400);
+    }
+    assert.equal((await app.inject({ method: 'POST', url: capture, headers, payload: { ...payload, messageIds: ['invented'] } })).statusCode, 409);
+    const saved = await app.inject({ method: 'POST', url: capture, headers, payload });
+    assert.equal(saved.statusCode, 200); assert.equal(saved.json().entry.author, 'Streamer (chat capture)');
+    assert.equal(store.list('pending').length, 1); assert.deepEqual(counts.read(), { total: 0, session: 0 });
+    assert.deepEqual(events, [{ type: 'pending-changed' }]); // No raw chat or premature reveal.
+    assert.equal((await app.inject({ method: 'POST', url: capture, headers, payload })).statusCode, 409);
+    assert.equal(store.list('pending').length, 1);
+    const id = saved.json().entry.id;
+    assert.equal((await app.inject({ method: 'POST', url: '/api/panel/proposals/' + id + '/review', headers, payload: { action: 'approve' } })).statusCode, 200);
+    assert.deepEqual(counts.read(), { total: 1, session: 1 }); assert.equal(events[1].type, 'canonized');
+    assert.equal(store.query('Chair Council')?.definition, payload.definition);
+    now = 600_000;
+    assert.deepEqual((await app.inject({ method: 'GET', url: '/api/panel/chat' })).json().messages, []);
+    assert.equal((await app.inject({ method: 'POST', url: capture, headers, payload })).statusCode, 409);
+    assert.ok(store.list()[0].sourceEvent.startsWith('capture:v1:'));
+    assert.equal(store.list()[0].sourceEvent.includes(sample.text), false);
+  } finally { await app.close(); store.close(); }
+});

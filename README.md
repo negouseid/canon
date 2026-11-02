@@ -126,7 +126,7 @@ input. Restart and query it again to verify persistence. These are clearly label
 local commands, using the real handler; they do not send Twitch messages or spend points.
 
 See the [failure-path audit](docs/RELIABILITY.md) for before/after behavior and tests.
-The suite now has **24 tests**, including forced EventSub disconnection/re-subscription
+The suite now has **29 tests**, including forced EventSub disconnection/re-subscription
 and a complete offline child-process flow from `.env.example`. An intentional mock
 HTTP 503 log during the test is expected.
 
@@ -305,6 +305,54 @@ expect **0 added / 8 already present** and still eight entries. With the five-se
 idle setting, a **Remember this?** ticker callback follows after a quiet gap.
 Never remove the main channel database just to make a recording start empty.
 
+## Catch this moment: live chat to lore
+
+The **Catch this moment** section at the top of `/panel` shows recent viewer chat.
+Select **one to five messages**, click **Draft lore**, give the moment a title, and
+edit the quoted text into a definition. Source messages stay visible while editing.
+Click **Save as proposal**, then **Approve & reveal** in the pending queue, or redeem
+**Canonize this** with `latest`. Saving a draft does not reveal it or increment the
+session count; successful approval/redemption does.
+
+This version uses streamer-written drafts, with no AI dependency, sentiment scoring,
+or automatic canonization. Messages are rendered as plain text. Canon's own `Canon:`
+bot replies are excluded; if you use the same Twitch account for the bot and streamer,
+your ordinary manually typed messages still appear.
+
+Recent chat is an in-memory buffer of **50 messages**, with a **10-minute lifetime**.
+It clears on restart. No chat archive is written; only the title/definition you
+explicitly save persists as lore, credited to **Streamer (chat capture)**. Live
+notifications contain only a change signal; raw chat is fetched by the panel and
+never added to the overlay event stream. Busy-chat notifications are coalesced.
+This uses the existing chat connection and needs no new Twitch scopes or API keys.
+
+If selected messages expire before saving, the draft remains on screen. Use
+**Change sources**, select recent messages, then **Draft lore** to resume with your
+edited title and definition intact. **Discard draft** clears it without saving.
+Retries with the same source messages cannot create duplicate proposals. A
+rejected/already captured selection needs different sources for a new proposal.
+
+### Offline demo without sending Twitch messages
+
+1. Open `/panel` → **Catch this moment** → **Offline chat rehearsal**.
+2. Enter a sample viewer name and message, then click **Add local chat message**.
+   Add a second message if useful. Samples are labeled **LOCAL REHEARSAL**.
+3. Select the message(s), click **Draft lore**, and enter a title such as
+   `The Snack Constitution`. Edit the definition to `The chair has the deciding vote on snacks.`
+4. Click **Save as proposal**. In the pending queue, click **Approve & reveal**.
+   The existing overlay reveal fires and both canon totals increase by one.
+5. Restart: the saved lore stays, recent chat disappears, and the session count resets.
+
+To rehearse against an isolated database (macOS/Linux/Git Bash):
+
+```sh
+PORT=3002 TWITCH_ENABLED=false SEED_ON_START=false DATABASE_PATH=./data/capture-demo.sqlite IDLE_LORE_SECONDS=5 npm start
+```
+
+Visit `http://127.0.0.1:3002/panel`. Use a new database filename for an empty take;
+do not remove your main channel database. With saved lore and a five-second idle
+setting, adding another ordinary rehearsal message postpones the idle callback.
+
 ## Live canon counts
 
 The overlay ticker and panel canon library show **total canon** and **canonized this
@@ -328,13 +376,14 @@ does not move either number.
 
 ## Auto-lore during idle gaps
 
-After `IDLE_LORE_SECONDS` without activity (default **180 seconds**), Canon sends a
+After `IDLE_LORE_SECONDS` without viewer chat or other tracked activity (default **180 seconds**), Canon sends a
 random saved lore callback to the overlay ticker. Set `0` to disable it. Invalid or
 negative values use the default. Restart after changing `.env`.
 
-Activity means a `!canon`/`!lore` command (including local rehearsal and commands
-suppressed by chat cooldown), a CANONIZED event, a raid/subscription community event,
-or an auto-lore drop. Regular chat conversation does not reset this feature's timer.
+Activity means ordinary viewer chat (including labeled local chat rehearsal), a
+`!canon`/`!lore` command (including command rehearsal and commands suppressed by
+chat cooldown), a saved capture proposal, a CANONIZED event, a raid/subscription
+community event, or an auto-lore drop. Canon's own bot replies do not reset it.
 Heartbeats, panel polling, and snapshots do not count. Empty/unavailable stores emit
 nothing and wait another full gap before retrying. The interval starts only after
 the server listens, is unref'd, and is cleared on shutdown.

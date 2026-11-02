@@ -59,6 +59,70 @@ async function loadVoice() {
   catch (error) { message('voiceMessage', error.message, true); }
   finally { $('reloadVoice').disabled = false; }
 }
+let chatMessages = [], chatRefreshing = false, chatRefreshAgain = false, captureSources = null, captureSaving = false;
+const selectedChat = new Set();
+function renderChat() {
+  $('chatSelected').textContent = selectedChat.size + ' selected · up to 5';
+  $('draftChat').disabled = !selectedChat.size || !!captureSources;
+  $('clearChatSelection').disabled = !!captureSources;
+  const nodes = [...chatMessages].reverse().map(item => {
+    const label = element('label', 'chat-row');
+    const check = element('input'); check.type = 'checkbox'; check.checked = selectedChat.has(item.id); check.disabled = !!captureSources;
+    check.setAttribute('aria-label', 'Select message from ' + item.author + ': ' + item.text);
+    check.onchange = () => {
+      if (check.checked && selectedChat.size >= 5) { check.checked = false; message('chatCaptureMessage', 'Choose up to five messages for one moment.', true); return; }
+      if (check.checked) selectedChat.add(item.id); else selectedChat.delete(item.id);
+      $('chatSelected').textContent = selectedChat.size + ' selected · up to 5'; $('draftChat').disabled = !selectedChat.size;
+    };
+    const body = element('span'); body.append(element('strong', '', item.author + (item.local ? ' · LOCAL REHEARSAL' : '')), element('span', 'chat-text', item.text));
+    label.append(check, body); return label;
+  });
+  $('chatList').replaceChildren(...(nodes.length ? nodes : [empty('Waiting for the next moment.', 'Viewer messages appear here while Twitch is connected. Try Offline chat rehearsal below.')]));
+}
+async function refreshChat() {
+  if (chatRefreshing) { chatRefreshAgain = true; return; }
+  chatRefreshing = true;
+  try {
+    const data = await api('/api/panel/chat');
+    if (!data || !Array.isArray(data.messages) || data.messages.length > 50) throw Error('Could not read recent chat.');
+    const valid = data.messages.filter(item => item && typeof item.id === 'string' && item.id.length <= 200 && typeof item.author === 'string' && item.author.length <= 80 && typeof item.text === 'string' && item.text.length <= 500);
+    const available = new Set(valid.map(item => item.id));
+    if (!captureSources) for (const id of selectedChat) if (!available.has(id)) selectedChat.delete(id);
+    if (JSON.stringify(chatMessages) !== JSON.stringify(valid)) { chatMessages = valid; renderChat(); }
+    $('chatConnection').textContent = 'Recent chat synced · newest first · ' + valid.length + ' available';
+  } catch { $('chatConnection').textContent = 'Recent chat unavailable. Your draft is kept; reconnecting automatically.'; }
+  finally { chatRefreshing = false; if (chatRefreshAgain) { chatRefreshAgain = false; void refreshChat(); } }
+}
+function discardCapture() {
+  captureSources = null; selectedChat.clear(); $('captureForm').hidden = true; $('captureHint').hidden = false;
+  $('captureTerm').value = ''; $('captureDefinition').value = ''; $('captureSources').replaceChildren(); renderChat();
+}
+$('draftChat').onclick = () => {
+  captureSources = chatMessages.filter(item => selectedChat.has(item.id));
+  if (!captureSources.length) { captureSources = null; return; }
+  $('captureSources').replaceChildren(...captureSources.map(item => element('li', '', item.author + (item.local ? ' (local rehearsal)' : '') + ': ' + item.text)));
+  if (!$('captureDefinition').value) $('captureDefinition').value = captureSources.map(item => item.text).join(' / ').slice(0, 1000);
+  $('captureForm').hidden = false; $('captureHint').hidden = true; renderChat(); $('captureTerm').focus();
+  message('chatCaptureMessage', 'Edit the quotes into lore, then save your proposal.');
+};
+$('clearChatSelection').onclick = () => { selectedChat.clear(); renderChat(); };
+$('reselectChatCapture').onclick = () => { captureSources = null; selectedChat.clear(); $('captureForm').hidden = true; $('captureHint').hidden = false; renderChat(); message('chatCaptureMessage', 'Draft text kept. Select recent sources and click Draft lore to resume.'); };
+$('discardChatCapture').onclick = () => { discardCapture(); message('chatCaptureMessage', 'Draft discarded. Nothing was saved.'); };
+$('captureForm').onsubmit = async event => {
+  event.preventDefault(); if (captureSaving || !captureSources) return;
+  captureSaving = true; $('saveChatCapture').disabled = true; $('discardChatCapture').disabled = true; $('reselectChatCapture').disabled = true;
+  try {
+    const data = await api('/api/panel/chat/capture', { method: 'POST', body: JSON.stringify({ messageIds: captureSources.map(item => item.id), term: $('captureTerm').value.trim(), definition: $('captureDefinition').value.trim() }) });
+    discardCapture(); message('chatCaptureMessage', 'Saved “' + data.entry.term + '” as a pending proposal. Approve it in the queue below.'); await refreshPanel();
+  } catch (error) { message('chatCaptureMessage', error.message, true); }
+  finally { captureSaving = false; $('saveChatCapture').disabled = false; $('discardChatCapture').disabled = false; $('reselectChatCapture').disabled = false; }
+};
+$('addChatDemo').onclick = async () => {
+  $('addChatDemo').disabled = true;
+  try { await api('/api/panel/chat/rehearse', { method: 'POST', body: JSON.stringify({ author: $('chatDemoAuthor').value, text: $('chatDemoText').value }) }); await refreshChat(); message('chatCaptureMessage', 'Local rehearsal message added. Nothing was sent to Twitch.'); }
+  catch (error) { message('chatCaptureMessage', error.message, true); }
+  finally { $('addChatDemo').disabled = false; }
+};
 $('voiceText').oninput = () => { updateVoice(); message('voiceMessage', ''); };
 $('reloadVoice').onclick = loadVoice;
 $('saveVoice').onclick = async () => {
@@ -98,10 +162,11 @@ function connect() {
   const socket = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
   let lastMessage = Date.now();
   const watchdog = setInterval(() => { if (Date.now() - lastMessage > 35_000) socket.close(); }, 5000);
-  socket.onopen = () => { retry = 1000; lastMessage = Date.now(); $('overlayStatus').textContent = 'Live connection'; void refreshPanel(); };
-  socket.onmessage = ({ data }) => { const event = CanonLive.parse(data); if (!event) return; lastMessage = Date.now(); if (event.type === 'snapshot') renderCounts(event.counts); if (event.type === 'pending-changed' || event.type === 'snapshot') void refreshPanel(); };
+  socket.onopen = () => { retry = 1000; lastMessage = Date.now(); $('overlayStatus').textContent = 'Live connection'; void refreshPanel(); void refreshChat(); };
+  socket.onmessage = ({ data }) => { const event = CanonLive.parse(data); if (!event) return; lastMessage = Date.now(); if (event.type === 'chat-changed') void refreshChat(); if (event.type === 'snapshot') renderCounts(event.counts); if (event.type === 'pending-changed' || event.type === 'snapshot') void refreshPanel(); };
   socket.onclose = () => { clearInterval(watchdog); $('overlayStatus').textContent = 'Reconnecting'; setTimeout(connect, retry); retry = Math.min(retry * 2, 15000); };
   socket.onerror = () => socket.close();
 }
+void refreshChat(); setInterval(refreshChat, 15000);
 void refreshPanel().then(loadVoice); void updateTwitch(); connect();
 setInterval(updateTwitch, 5000); setInterval(refreshPanel, 15000);

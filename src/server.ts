@@ -7,6 +7,7 @@ import { registerTwitch } from './twitch.js';
 import { registerPanel } from './panel.js';
 import { createIdleLore, idleLoreSeconds } from './idle-lore.js';
 import type { LiveEvent } from './events.js';
+import { createChatCapture } from './chat-capture.js';
 import { createCanonCounts } from './canon-counts.js';
 const requestedPort = Number(process.env.PORT || 3000);
 if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) { console.error('PORT is invalid; using 3000.'); }
@@ -25,8 +26,9 @@ const hub = createLiveHub(app.server, store, port, app.log, counts);
 const idle = createIdleLore(store, hub.publish, idleLoreSeconds(process.env.IDLE_LORE_SECONDS));
 const publish = (event: LiveEvent) => { idle.observe(event); return hub.publish(event); };
 app.addHook('onClose', async () => { idle.stop(); });
-const twitch = registerTwitch(app, store, port, publish, idle.activity, counts);
-registerPanel(app, store, publish, undefined, runtime.status, idle.activity, counts);
+const chatCapture = createChatCapture(idle.activity, () => publish({ type: 'chat-changed' }));
+const twitch = registerTwitch(app, store, port, publish, idle.activity, counts, chatCapture);
+registerPanel(app, store, publish, undefined, runtime.status, idle.activity, counts, chatCapture);
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof StorageUnavailable) return reply.code(503).send({ error: error.message });
   return reply.send(error);

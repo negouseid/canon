@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { mkdirSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Store } from './store.js';
+import type { ChatCapture } from './chat-capture.js';
 import { createCanonCounts } from './canon-counts.js';
 import { handleCommand, chatText, isCanonCommand } from './commands.js';
 import { createOAuthStates } from './oauth-state.js';
@@ -11,7 +12,7 @@ import { registerEventSub } from './eventsub.js';
 import type { Publish } from './events.js';
 import { ConfigurationError, deadline, permanentFailure, readToken, retryTask, validateToken } from './reliability.js';
 
-export function registerTwitch(app: FastifyInstance, store: Store, port: number, publish: Publish, onActivity: () => void = () => {}, counts = createCanonCounts(store)) {
+export function registerTwitch(app: FastifyInstance, store: Store, port: number, publish: Publish, onActivity: () => void = () => {}, counts = createCanonCounts(store), chatCapture?: ChatCapture) {
   const enabled = process.env.TWITCH_ENABLED === 'true';
   const clientId = process.env.TWITCH_CLIENT_ID || '';
   const clientSecret = process.env.TWITCH_CLIENT_SECRET || '';
@@ -112,7 +113,9 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
     const recent = new Map<string, number>();
     let lastReply = 0;
     next.onMessage((_room, user, text, message) => {
-      if (chat !== next || !status.connected || !isCanonCommand(text)) return;
+      if (chat !== next || !status.connected) return;
+      chatCapture?.add({ id: 'twitch:' + message.id, author: user, text, ownBot: user.toLowerCase() === expectedBot && text.startsWith('Canon:') });
+      if (!isCanonCommand(text)) return;
       onActivity(); // Commands count as activity even when reply cooldown suppresses them.
       const now = Date.now();
       const userId = message.userInfo.userId || user;

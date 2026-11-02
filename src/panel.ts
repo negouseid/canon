@@ -6,9 +6,11 @@ import type { Store } from './store.js';
 import type { Publish } from './events.js';
 import { handleCommand, isCanonCommand } from './commands.js';
 import { seed } from './seed.js';
+import { createChatCapture } from './chat-capture.js';
 import { createCanonCounts } from './canon-counts.js';
 
-export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md'), storage?: { mode: string; persistent: boolean; available: boolean; warning: string }, onActivity: () => void = () => {}, counts = createCanonCounts(store)) {
+export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md'), storage?: { mode: string; persistent: boolean; available: boolean; warning: string }, onActivity: () => void = () => {}, counts = createCanonCounts(store), chatCapture = createChatCapture(onActivity, () => publish({ type: 'chat-changed' }))) {
+  app.addHook('onClose', async () => { chatCapture.close(); });
   const csrf = randomBytes(32).toString('hex');
   const revision = (text: string) => createHash('sha256').update(text).digest('hex');
   function readVoice() {
@@ -52,6 +54,37 @@ export function registerPanel(app: FastifyInstance, store: Store, publish: Publi
     const response = handleCommand(store, request.body.command, 'Demo viewer', 'demo:' + randomUUID(), () => publish({ type: 'pending-changed' }));
     if (!response) return reply.code(400).send({ error: 'Use !canon term, !canon add term: definition, or !lore.' });
     return { reply: 'Canon: ' + response, local: true };
+  });
+  app.get('/api/panel/chat', async (_, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    return { messages: chatCapture.list() };
+  });
+  app.post<{ Body: { text: string; author: string } }>('/api/panel/chat/rehearse', {
+    preHandler: mutation, bodyLimit: 4000,
+    schema: { body: { type: 'object', required: ['text', 'author'], additionalProperties: false, properties: {
+      text: { type: 'string', minLength: 1, maxLength: 500 }, author: { type: 'string', minLength: 1, maxLength: 25, pattern: '^[a-zA-Z0-9_]+$' }
+    } } }
+  }, async (request, reply) => {
+    const message = chatCapture.add({ id: 'demo:' + randomUUID(), ...request.body, local: true });
+    if (!message) return reply.code(400).send({ error: 'Enter a single-line chat message, up to 500 characters.' });
+    return { local: true };
+  });
+  app.post<{ Body: { messageIds: string[]; term: string; definition: string } }>('/api/panel/chat/capture', {
+    preHandler: mutation, bodyLimit: 10000,
+    schema: { body: { type: 'object', required: ['messageIds', 'term', 'definition'], additionalProperties: false, properties: {
+      messageIds: { type: 'array', minItems: 1, maxItems: 5, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 200 } },
+      term: { type: 'string', minLength: 1, maxLength: 100 }, definition: { type: 'string', minLength: 1, maxLength: 1000 }
+    } } }
+  }, async (request, reply) => {
+    const { messageIds, term, definition } = request.body;
+    if (!term.trim() || !definition.trim() || /[\x00-\x1f\x7f]/.test(term + definition)) return reply.code(400).send({ error: 'Enter a single-line title and definition.' });
+    const available = new Set(chatCapture.list().map(message => message.id));
+    if (!messageIds.every(id => available.has(id))) return reply.code(409).send({ error: 'Some source messages expired. Your draft is kept; choose recent messages and try again.' });
+    const sourceEvent = 'capture:v1:' + createHash('sha256').update(JSON.stringify([...messageIds].sort())).digest('hex');
+    const entry = store.add({ term, definition, author: 'Streamer (chat capture)', sourceEvent });
+    if (!entry) return reply.code(409).send({ error: 'Those source messages already have a saved proposal. Check the pending queue or canon library.' });
+    onActivity(); publish({ type: 'pending-changed' });
+    return { entry };
   });
   app.post('/api/panel/seed-starter', {
     preHandler: mutation, bodyLimit: 1024,

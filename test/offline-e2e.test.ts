@@ -62,3 +62,36 @@ for (const mode of ['missing', 'malformed'] as const) test('enabled Twitch with 
     assert.equal(fixture.output().includes('test-secret'), false);
   } finally { await fixture.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('offline chat capture pushes only a change signal, saves edited lore, and forgets chat on restart', { timeout: 20_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'canon-capture-'));
+  let fixture = await startFixture(dir); let socket: WebSocket | undefined;
+  try {
+    const snapshot = await (await fetch(fixture.base + '/api/panel')).json();
+    const headers = { 'content-type': 'application/json', 'x-canon-csrf': snapshot.csrf, origin: fixture.base };
+    socket = new WebSocket(fixture.base.replace('http:', 'ws:') + '/ws', { origin: fixture.base });
+    const notice = new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('No chat change notice')), 3000);
+      socket!.on('message', data => { const event = JSON.parse(String(data)); if (event.type === 'chat-changed') { clearTimeout(timer); resolve(event); } });
+    });
+    await once(socket, 'open');
+    const raw = 'RAW_CHAT_ONLY_8291 the chair voted for snacks';
+    assert.equal((await fetch(fixture.base + '/api/panel/chat/rehearse', { method: 'POST', headers, body: JSON.stringify({ author: 'Demo_viewer', text: raw }) })).status, 200);
+    assert.deepEqual(await notice, { type: 'chat-changed' });
+    const recent = await (await fetch(fixture.base + '/api/panel/chat')).json();
+    assert.equal(recent.messages.length, 1);
+    const saved = await (await fetch(fixture.base + '/api/panel/chat/capture', { method: 'POST', headers, body: JSON.stringify({ messageIds: [recent.messages[0].id], term: 'Snack Constitution', definition: 'The chair holds the deciding vote on snacks.' }) })).json();
+    assert.equal(saved.entry.status, 'pending');
+    assert.deepEqual((await (await fetch(fixture.base + '/api/panel')).json()).counts, { total: 8, session: 0 });
+    assert.equal((await fetch(fixture.base + '/api/panel/proposals/' + saved.entry.id + '/review', { method: 'POST', headers, body: JSON.stringify({ action: 'approve' }) })).status, 200);
+    assert.deepEqual((await (await fetch(fixture.base + '/api/panel')).json()).counts, { total: 9, session: 1 });
+    socket.close(); await fixture.stop(); fixture = await startFixture(dir);
+    assert.deepEqual((await (await fetch(fixture.base + '/api/panel/chat')).json()).messages, []);
+    const canon = await (await fetch(fixture.base + '/api/canon')).json();
+    assert.ok(canon.some((entry: { term: string }) => entry.term === 'Snack Constitution'));
+    assert.equal(JSON.stringify(canon).includes('RAW_CHAT_ONLY_8291'), false);
+    assert.deepEqual((await (await fetch(fixture.base + '/api/panel')).json()).counts, { total: 9, session: 0 });
+    assert.equal(fixture.output().includes('RAW_CHAT_ONLY_8291'), false);
+    assert.equal(fixture.output().includes('UnhandledPromiseRejection'), false);
+  } finally { socket?.terminate(); await fixture.stop(); rmSync(dir, { recursive: true, force: true }); }
+});
