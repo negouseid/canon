@@ -126,7 +126,7 @@ input. Restart and query it again to verify persistence. These are clearly label
 local commands, using the real handler; they do not send Twitch messages or spend points.
 
 See the [failure-path audit](docs/RELIABILITY.md) for before/after behavior and tests.
-The suite now has **22 tests**, including forced EventSub disconnection/re-subscription
+The suite now has **23 tests**, including forced EventSub disconnection/re-subscription
 and a complete offline child-process flow from `.env.example`. An intentional mock
 HTTP 503 log during the test is expected.
 
@@ -280,6 +280,30 @@ Canon does not automatically fulfill, cancel, or refund reward requests.
 
 Subscriptions produce a welcome ticker message. Incoming raids produce a welcome
 burst containing a random piece of channel lore. Neither creates a canonical entry.
+
+## Starter lore for an empty channel
+
+In `/panel`, click **Seed starter lore** beside the **The canon library** heading.
+It adds the same eight curated sample entries used by startup seeding and immediately
+publishes the updated lore snapshot to the overlay. Existing user lore is kept.
+The panel reports how many were **added** versus **already present**. Clicking again
+adds zero duplicates, using the existing `seed:v1:<index>` event keys. This is starter
+sample lore, not a claim that those events happened on your channel.
+
+To record the cold-start demo without touching your main database, use a separate
+terminal in the repo directory (macOS/Linux/Git Bash):
+
+```sh
+PORT=3002 TWITCH_ENABLED=false SEED_ON_START=false DATABASE_PATH=./data/starter-demo-take1.sqlite IDLE_LORE_SECONDS=5 npm start
+```
+
+For PowerShell, put those values in a separate demo checkout's `.env` instead, then
+run `npm start`. Use a free port and a new demo database filename for each empty take.
+Open `http://127.0.0.1:3002/panel`: expect **0 entries**, click **Seed starter lore**,
+then expect **8 added / 0 already present**, a filled library and ticker. Click again:
+expect **0 added / 8 already present** and still eight entries. With the five-second
+idle setting, a **Remember this?** ticker callback follows after a quiet gap.
+Never remove the main channel database just to make a recording start empty.
 
 ## Auto-lore during idle gaps
 

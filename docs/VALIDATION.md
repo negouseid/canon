@@ -1,5 +1,27 @@
 # Verification — November 1, 2026
 
+## Feature 2: starter lore pack — both features verified
+
+- Final `npm run build && npm test` passed: **23 tests**, zero failures. Every existing
+  test remains passing, including the forced EventSub recovery and offline workflow.
+- The panel endpoint uses the existing mutation preHandler, a 1024-byte body limit,
+  and empty-object schema. Tests reject missing/invalid CSRF, cross-origin requests,
+  incorrect content type, and unexpected body properties before any entries are added.
+- Both startup and the panel call the one shared `seed()` function/list. An empty
+  store returns `{ added: 8, alreadyPresent: 0 }`; a second seed returns
+  `{ added: 0, alreadyPresent: 8 }`, still using `seed:v1:<index>` source keys.
+- A snapshot (not a fake canonization) is published after each successful seed.
+- Browser QA used a separate database with SEED_ON_START=false and Twitch disabled:
+  first screen had zero entries; Seed starter lore filled the library/ticker immediately;
+  a second click reported zero added, eight already present, and still eight entries.
+- With IDLE_LORE_SECONDS=5, Remember this? callbacks appeared in the ticker. A TEST
+  CANONIZED card displayed independently while the lore ticker continued.
+- Live-hub transport and live-message.js were reused unchanged. No analytics, scoring,
+  generated lore, voice rewriting, or Twitch chat spam was added.
+- For an empty recording take, use a new demo DATABASE_PATH, PORT=3002 (or another
+  free port), TWITCH_ENABLED=false, SEED_ON_START=false, IDLE_LORE_SECONDS=5, then
+  `npm start`. Main channel data was not changed by browser QA.
+
 ## Feature 1: auto-lore on idle
 
 - `npm run build && npm test` passed: **22 tests**, including every existing test.

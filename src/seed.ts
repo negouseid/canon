@@ -12,7 +12,11 @@ const samples = [
   ['Snack% Speedrun', 'The only category where leaving the desk counts as optimal routing.']
 ];
 export function seed(store: Store) {
-  for (const [index, [term, definition]] of samples.entries()) store.add({ term, definition, author: 'Canon demo', sourceEvent: `seed:v1:${index}` }, 'canon');
+  let added = 0;
+  for (const [index, [term, definition]] of samples.entries()) {
+    if (store.add({ term, definition, author: 'Canon demo', sourceEvent: `seed:v1:${index}` }, 'canon')) added++;
+  }
+  return { added, alreadyPresent: samples.length - added };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const store = openStore(process.env.DATABASE_PATH || './data/canon.sqlite');

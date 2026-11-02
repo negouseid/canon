@@ -34,7 +34,7 @@ function renderCanon() {
   const entries = state.canon.filter(entry => [entry.term, entry.definition, entry.author].some(text => text.toLocaleLowerCase().includes(query)));
   $('librarySummary').textContent = query ? entries.length + ' of ' + state.canon.length + ' entries match.' : 'Every chapter, saved across streams.';
   const nodes = entries.map(entry => { const card = element('article', 'lore-card'); card.append(element('h3', '', entry.term), element('p', 'definition', entry.definition), element('div', 'meta', 'By ' + entry.author + ' · ' + new Date(entry.createdAt).toLocaleDateString())); return card; });
-  $('canonList').replaceChildren(...(nodes.length ? nodes : [empty(query ? 'No matching lore.' : 'No canon yet.', query ? 'Try a different term or author.' : 'Approve a proposal to begin your channel history.')]));
+  $('canonList').replaceChildren(...(nodes.length ? nodes : [empty(query ? 'No matching lore.' : 'No canon yet.', query ? 'Try a different term or author.' : 'Approve a proposal or use Seed starter lore to begin.')]));
 }
 async function refreshPanel() {
   if (refreshing) { refreshAgain = true; return; }
@@ -68,6 +68,14 @@ $('saveVoice').onclick = async () => {
   finally { voiceSaving = false; $('reloadVoice').disabled = false; updateVoice(); }
 };
 window.addEventListener('beforeunload', event => { if (voiceDirty()) { event.preventDefault(); event.returnValue = ''; } });
+$('seedStarter').onclick = async () => {
+  $('seedStarter').disabled = true;
+  try {
+    const result = await api('/api/panel/seed-starter', { method: 'POST', body: '{}' });
+    message('panelMessage', 'Starter lore: ' + result.added + ' added · ' + result.alreadyPresent + ' already present.');
+  } catch (error) { message('panelMessage', error.message, true); }
+  finally { await refreshPanel(); $('seedStarter').disabled = false; }
+};
 $('search').oninput = renderCanon;
 $('runDemo').onclick = async () => { $('runDemo').disabled = true; try { const result = await api('/api/panel/rehearse', { method: 'POST', body: JSON.stringify({ command: $('demoCommand').value }) }); message('demoReply', result.reply); await refreshPanel(); } catch (error) { message('demoReply', error.message, true); } finally { $('runDemo').disabled = false; } };
 $('overlayUrl').textContent = location.origin + '/overlay';

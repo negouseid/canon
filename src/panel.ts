@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Store } from './store.js';
 import type { Publish } from './events.js';
 import { handleCommand, isCanonCommand } from './commands.js';
+import { seed } from './seed.js';
 
 export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md'), storage?: { mode: string; persistent: boolean; available: boolean; warning: string }, onActivity: () => void = () => {}) {
   const csrf = randomBytes(32).toString('hex');
@@ -49,6 +50,14 @@ export function registerPanel(app: FastifyInstance, store: Store, publish: Publi
     const response = handleCommand(store, request.body.command, 'Demo viewer', 'demo:' + randomUUID(), () => publish({ type: 'pending-changed' }));
     if (!response) return reply.code(400).send({ error: 'Use !canon term, !canon add term: definition, or !lore.' });
     return { reply: 'Canon: ' + response, local: true };
+  });
+  app.post('/api/panel/seed-starter', {
+    preHandler: mutation, bodyLimit: 1024,
+    schema: { body: { type: 'object', additionalProperties: false, maxProperties: 0 } }
+  }, async () => {
+    const result = seed(store);
+    publish({ type: 'snapshot', entries: store.list() });
+    return result;
   });
   app.get('/api/panel/voice', async (_, reply) => {
     reply.header('Cache-Control', 'no-store');

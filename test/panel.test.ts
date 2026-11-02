@@ -54,3 +54,29 @@ test('voice editor persists, rejects stale saves, and leaves the saved file inta
     assert.equal(readFileSync(path, 'utf8'), saved.json().text);
   } finally { await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('starter pack seeds an empty store once, reports counts, publishes snapshot, and enforces mutation security', async () => {
+  const store = openStore(':memory:'); const app = Fastify(); const events: LiveEvent[] = [];
+  registerPanel(app, store, event => events.push(event));
+  try {
+    const csrf = (await app.inject({ method: 'GET', url: '/api/panel' })).json().csrf;
+    const url = '/api/panel/seed-starter';
+    const headers = { 'x-canon-csrf': csrf, host: 'localhost:3001' };
+    for (const rejectedHeaders of [{}, { 'x-canon-csrf': 'invalid' }, { ...headers, origin: 'https://example.com' }]) {
+      assert.equal((await app.inject({ method: 'POST', url, headers: rejectedHeaders, payload: {} })).statusCode, 403);
+    }
+    assert.equal(store.list().length, 0); assert.equal(events.length, 0);
+    assert.equal((await app.inject({ method: 'POST', url, headers, payload: 'text' })).statusCode, 415);
+    assert.equal((await app.inject({ method: 'POST', url, headers, payload: { unexpected: true } })).statusCode, 400);
+    const first = await app.inject({ method: 'POST', url, headers, payload: {} });
+    assert.equal(first.statusCode, 200); assert.deepEqual(first.json(), { added: 8, alreadyPresent: 0 });
+    assert.equal(store.list().length, 8); assert.equal(store.list('pending').length, 0);
+    assert.deepEqual(store.list().map(entry => entry.sourceEvent).sort(), Array.from({ length: 8 }, (_, index) => 'seed:v1:' + index));
+    assert.equal(events[0].type, 'snapshot');
+    if (events[0].type === 'snapshot') assert.equal(events[0].entries.length, 8);
+    const second = await app.inject({ method: 'POST', url, headers, payload: {} });
+    assert.equal(second.statusCode, 200); assert.deepEqual(second.json(), { added: 0, alreadyPresent: 8 });
+    assert.equal(store.list().length, 8); assert.equal(events.length, 2);
+    assert.ok(events.every(event => event.type === 'snapshot')); // No fake canonization burst.
+  } finally { await app.close(); store.close(); }
+});
