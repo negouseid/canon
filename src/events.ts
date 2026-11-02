@@ -4,7 +4,7 @@ export type LiveEvent =
   | { type: 'snapshot'; entries: Entry[] }
   | { type: 'pending-changed' }
   | { type: 'heartbeat' }
-  | { type: 'community'; kind: 'raid' | 'subscription'; text: string };
+  | { type: 'community'; kind: 'raid' | 'subscription' | 'lore'; text: string };
 export type Publish = (event: LiveEvent) => void;
 
 export function createEventHandlers(store: Store, rewardTitle: string, publish: Publish) {

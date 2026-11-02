@@ -5,6 +5,8 @@ import { createRuntimeStore, StorageUnavailable } from './runtime-store.js';
 import { createLiveHub } from './live-hub.js';
 import { registerTwitch } from './twitch.js';
 import { registerPanel } from './panel.js';
+import { createIdleLore, idleLoreSeconds } from './idle-lore.js';
+import type { LiveEvent } from './events.js';
 const requestedPort = Number(process.env.PORT || 3000);
 if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) { console.error('PORT is invalid; using 3000.'); }
 const port = Number.isInteger(requestedPort) && requestedPort >= 1 && requestedPort <= 65535 ? requestedPort : 3000;
@@ -18,9 +20,11 @@ app.addHook('onRequest', async (request, reply) => {
   reply.header('Referrer-Policy', 'no-referrer');
 });
 const hub = createLiveHub(app.server, store, port, app.log);
-const publish = hub.publish;
-const twitch = registerTwitch(app, store, port, publish);
-registerPanel(app, store, publish, undefined, runtime.status);
+const idle = createIdleLore(store, hub.publish, idleLoreSeconds(process.env.IDLE_LORE_SECONDS));
+const publish = (event: LiveEvent) => { idle.observe(event); return hub.publish(event); };
+app.addHook('onClose', async () => { idle.stop(); });
+const twitch = registerTwitch(app, store, port, publish, idle.activity);
+registerPanel(app, store, publish, undefined, runtime.status, idle.activity);
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof StorageUnavailable) return reply.code(503).send({ error: error.message });
   return reply.send(error);
@@ -56,6 +60,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => 
 });
 try {
   await app.listen({ port, host: '127.0.0.1' });
+  idle.start();
   if (runtime.status.warning) app.log.warn(runtime.status.warning);
   void twitch.start().catch(() => app.log.warn('Twitch startup failed; local mode remains available.'));
 }

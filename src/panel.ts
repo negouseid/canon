@@ -4,9 +4,9 @@ import { resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Store } from './store.js';
 import type { Publish } from './events.js';
-import { handleCommand } from './commands.js';
+import { handleCommand, isCanonCommand } from './commands.js';
 
-export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md'), storage?: { mode: string; persistent: boolean; available: boolean; warning: string }) {
+export function registerPanel(app: FastifyInstance, store: Store, publish: Publish, voicePath = resolve(process.env.VOICE_PATH || './voice.md'), storage?: { mode: string; persistent: boolean; available: boolean; warning: string }, onActivity: () => void = () => {}) {
   const csrf = randomBytes(32).toString('hex');
   const revision = (text: string) => createHash('sha256').update(text).digest('hex');
   function readVoice() {
@@ -45,6 +45,7 @@ export function registerPanel(app: FastifyInstance, store: Store, publish: Publi
     preHandler: mutation, bodyLimit: 8000,
     schema: { body: { type: 'object', required: ['command'], additionalProperties: false, properties: { command: { type: 'string', minLength: 1, maxLength: 1500 } } } }
   }, async (request, reply) => {
+    if (isCanonCommand(request.body.command)) onActivity();
     const response = handleCommand(store, request.body.command, 'Demo viewer', 'demo:' + randomUUID(), () => publish({ type: 'pending-changed' }));
     if (!response) return reply.code(400).send({ error: 'Use !canon term, !canon add term: definition, or !lore.' });
     return { reply: 'Canon: ' + response, local: true };

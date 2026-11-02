@@ -126,7 +126,7 @@ input. Restart and query it again to verify persistence. These are clearly label
 local commands, using the real handler; they do not send Twitch messages or spend points.
 
 See the [failure-path audit](docs/RELIABILITY.md) for before/after behavior and tests.
-The suite now has **19 tests**, including forced EventSub disconnection/re-subscription
+The suite now has **22 tests**, including forced EventSub disconnection/re-subscription
 and a complete offline child-process flow from `.env.example`. An intentional mock
 HTTP 503 log during the test is expected.
 
@@ -177,6 +177,7 @@ TWITCH_BOT_USERNAME=your_bot_login
 |---|---|---|
 | `PORT` | All modes | Pick a free local port; default `3000`. Match all URLs to it. |
 | `DATABASE_PATH` | All modes | Keep `./data/canon.sqlite`; Canon creates it and its directory. No database credentials. |
+| `IDLE_LORE_SECONDS` | Optional | Idle seconds before a proactive lore ticker callback; default `180`, `0` disables. |
 | `SEED_ON_START` | Demo | Keep `true` for eight sample entries. `false` skips samples in a fresh database. |
 | `TWITCH_ENABLED` | Live Twitch | Change `false` to `true` after app/account setup; restart. |
 | `TWITCH_CLIENT_ID` | Live Twitch | Your registered Twitch app's Manage page → Client ID. |
@@ -279,6 +280,25 @@ Canon does not automatically fulfill, cancel, or refund reward requests.
 
 Subscriptions produce a welcome ticker message. Incoming raids produce a welcome
 burst containing a random piece of channel lore. Neither creates a canonical entry.
+
+## Auto-lore during idle gaps
+
+After `IDLE_LORE_SECONDS` without activity (default **180 seconds**), Canon sends a
+random saved lore callback to the overlay ticker. Set `0` to disable it. Invalid or
+negative values use the default. Restart after changing `.env`.
+
+Activity means a `!canon`/`!lore` command (including local rehearsal and commands
+suppressed by chat cooldown), a CANONIZED event, a raid/subscription community event,
+or an auto-lore drop. Regular chat conversation does not reset this feature's timer.
+Heartbeats, panel polling, and snapshots do not count. Empty/unavailable stores emit
+nothing and wait another full gap before retrying. The interval starts only after
+the server listens, is unref'd, and is cleared on shutdown.
+
+For recording, set `IDLE_LORE_SECONDS=5` in `.env`, run `npm start`, and open `/panel`
+or `/overlay?preview`. After five quiet seconds, look for **Remember this?** in the
+lore ticker. It uses the existing community-burst path and does not add a CANONIZED
+card, change lore, or send a Twitch chat message. The ticker may finish an existing
+12-second community burst before showing the next callback. Restore `180` afterward.
 
 ## OBS: add both routes
 

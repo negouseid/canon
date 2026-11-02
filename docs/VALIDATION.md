@@ -1,5 +1,20 @@
 # Verification — November 1, 2026
 
+## Feature 1: auto-lore on idle
+
+- `npm run build && npm test` passed: **22 tests**, including every existing test.
+- Injected-clock tests use no wall-clock sleeps. They verify one lore callback after
+  the gap, reset on commands/canonizations/community events and auto-drops, zero mode,
+  interval unref/cleanup, and full-gap retry spacing for empty/failing stores.
+- The existing overlay script test now verifies `community / lore` reaches the ticker
+  while a CANONIZED card reveals independently. The hub and browser message parser are
+  reused without changing their transport behavior.
+- `IDLE_LORE_SECONDS` defaults to 180, is documented in `.env.example`/README, and
+  accepts 0 to disable. The timer starts only after the server listens and stops on close.
+- Actual chat command activity is recorded before cooldown filtering; offline command
+  rehearsal also resets the same timer. No Twitch message, analytics, or scoring is added.
+
+
 The later [reliability pass](RELIABILITY.md) expands this baseline to 19 tests, including
 forced EventSub reconnects and a full offline workflow. The results below describe the
 original pre-pass release.

@@ -29,7 +29,10 @@ test('actual overlay script ignores malformed messages, keeps ticker running off
   for (const data of ['not json', 'null', '{"type":"snapshot","entries":null}', '{"type":"canonized","entry":null}']) assert.doesNotThrow(() => first.onmessage({ data }));
   const entry = { term: 'Safe lore', definition: 'The overlay keeps going.', author: 'viewer' };
   first.onmessage({ data: JSON.stringify({ type: 'snapshot', entries: [null, entry] }) });
+  first.onmessage({ data: JSON.stringify({ type: 'community', kind: 'lore', text: 'Remember this? Safe lore' }) });
+  assert.equal(node('lore').textContent, 'Remember this? Safe lore');
   first.onmessage({ data: JSON.stringify({ type: 'canonized', entry }) });
+  assert.equal(node('lore').textContent, 'Remember this? Safe lore');
   assert.equal(node('term').textContent, 'Safe lore'); assert.equal(node('reveal').className, 'reveal active');
   advance(10_000); assert.equal(node('reveal').className, 'reveal');
   first.close(); advance(1000); assert.equal(sockets.length, 2);

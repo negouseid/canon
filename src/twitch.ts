@@ -10,7 +10,7 @@ import { registerEventSub } from './eventsub.js';
 import type { Publish } from './events.js';
 import { ConfigurationError, deadline, permanentFailure, readToken, retryTask, validateToken } from './reliability.js';
 
-export function registerTwitch(app: FastifyInstance, store: Store, port: number, publish: Publish) {
+export function registerTwitch(app: FastifyInstance, store: Store, port: number, publish: Publish, onActivity: () => void = () => {}) {
   const enabled = process.env.TWITCH_ENABLED === 'true';
   const clientId = process.env.TWITCH_CLIENT_ID || '';
   const clientSecret = process.env.TWITCH_CLIENT_SECRET || '';
@@ -112,6 +112,7 @@ export function registerTwitch(app: FastifyInstance, store: Store, port: number,
     let lastReply = 0;
     next.onMessage((_room, user, text, message) => {
       if (chat !== next || !status.connected || !isCanonCommand(text)) return;
+      onActivity(); // Commands count as activity even when reply cooldown suppresses them.
       const now = Date.now();
       const userId = message.userInfo.userId || user;
       if (now - (recent.get(userId) || 0) < 5000 || now - lastReply < 1500) return;
